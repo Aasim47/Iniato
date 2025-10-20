@@ -2,47 +2,40 @@ package com.backend.iniato.entity;
 
 
 import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import org.springframework.security.core.GrantedAuthority;
 
 import java.util.*;
 
 @Entity
     @Table(name = "roles")
-    public class Role {
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+    public class Role implements GrantedAuthority {
 
         @Id
         @GeneratedValue(strategy = GenerationType.IDENTITY)
-        private Long id;
+        private Long role_id;
 
-        @Column(unique = true, nullable = false)
-        private String name;
-
+        @Column(unique = true, nullable = false,name = "role_name")
+        private String roleName;
         // Getters and setters...
 
-    public Long getId() {
-        return id;
-    }
 
-    public void setId(Long id) {
-        this.id = id;
-    }
-
-    public String getName() {
-        return name;
-    }
-
-    public void setName(String name) {
-        this.name = name;
-    }
 
     @ManyToMany(mappedBy = "roles")
     private Set<User> users;
 
-    public Set<User> getUsers() {
-        return users;
+    @Override
+    public String getAuthority() {
+        return roleName;
     }
 
-    public void setUsers(Set<User> users) {
-        this.users = users;
-    }
+
 }
 
