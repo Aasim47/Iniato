@@ -24,7 +24,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 
 public class AuthService {
-@Autowired
+    @Autowired
     private  UserRepository userRepository;
     @Autowired
     private  PasswordEncoder passwordEncoder;
