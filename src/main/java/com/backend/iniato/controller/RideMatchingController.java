@@ -20,7 +20,7 @@ public class RideMatchingController {
 
     private final RideMatchingService rideMatchingService;
 
-    @PostMapping("/request")
+    @PostMapping("/request-matching")
     public ResponseEntity<RideRequest> requestRide(@RequestBody RideRequestDTO requestDTO,
                                                    @AuthenticationPrincipal User passenger) {
         RideRequest rideRequest = rideMatchingService.saveRideRequest(requestDTO, passenger);

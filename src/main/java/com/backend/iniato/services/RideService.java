@@ -34,7 +34,7 @@ public class RideService {
         User passenger = getCurrentUser();
 
         Ride ride = Ride.builder()
-                .pickupLocation(requestDTO.getPickupLocation())
+                .pickupLocation(requestDTO.getPickupLocaton())
                 .destination(requestDTO.getDestination())
                 .requestedTime(LocalDateTime.now())
                 .status(RideStatus.REQUESTED)

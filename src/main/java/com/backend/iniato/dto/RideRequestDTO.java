@@ -8,4 +8,7 @@ public class RideRequestDTO {
     private double destLat;
     private double destLng;
     private String pickupTime;
+    private String pickupLocaton;
+    private String destination;
+
 }

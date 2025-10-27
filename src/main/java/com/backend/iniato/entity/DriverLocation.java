@@ -29,4 +29,6 @@ public class DriverLocation {
 
     private LocalDateTime lastUpdated;
 
+
+
 }

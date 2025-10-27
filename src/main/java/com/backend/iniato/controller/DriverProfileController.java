@@ -18,7 +18,7 @@ public class DriverProfileController {
     private final DriverProfileService driverProfileService;
 
     @GetMapping("/profile")
-    @PreAuthorize("hasRole('DRIVER')")
+    @PreAuthorize("hasAuthority('DRIVER')")
     public ResponseEntity<DriverProfileResponse> getProfile() {
         return ResponseEntity.ok(driverProfileService.getProfile());
     }

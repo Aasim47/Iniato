@@ -1,6 +1,7 @@
 package com.backend.iniato.entity;
 
 
+import com.backend.iniato.enums.Gender;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -15,8 +16,16 @@ public class PassengerProfile {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+
+    @Column
     private String fullName;
-    private String phoneNumber;
+
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private Gender gender;
+
+
 
     @OneToOne
     @JoinColumn(name = "user_id", nullable = false)

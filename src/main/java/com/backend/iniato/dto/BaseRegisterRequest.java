@@ -7,7 +7,7 @@ import jakarta.validation.constraints.*;
 import java.util.Set;
 
 
-public class RegisterRequest {
+public class BaseRegisterRequest {
 
     @NotBlank(message = "Email is required")
     @Email(message = "Email should be valid")

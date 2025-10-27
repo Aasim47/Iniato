@@ -31,7 +31,7 @@ public class RideMatchingService {
 
         return drivers.stream()
                 .map(d -> new NearbyDriverDTO(
-                        d.getDriver().getUser_id(),
+                        d.getDriver().getId(),
                         d.getCurrentLocation().getY(),
                         d.getCurrentLocation().getX(),
                         pickup.distance(d.getCurrentLocation()) * 111000 // degrees → meters approx
