@@ -24,13 +24,13 @@ public class DriverProfileController {
     }
 
     @PutMapping("/profile")
-    @PreAuthorize("hasRole('DRIVER')")
+    @PreAuthorize("hasAuthority('DRIVER')")
     public ResponseEntity<DriverProfileResponse> updateProfile(@RequestBody DriverProfileRequest request) {
         return ResponseEntity.ok(driverProfileService.updateProfile(request));
     }
 
     @PatchMapping("/status")
-    @PreAuthorize("hasRole('DRIVER')")
+    @PreAuthorize("hasAuthority('DRIVER')")
     public ResponseEntity<DriverProfileResponse> updateStatus(@RequestParam DriverStatus status) {
         return ResponseEntity.ok(driverProfileService.updateStatus(status));
     }

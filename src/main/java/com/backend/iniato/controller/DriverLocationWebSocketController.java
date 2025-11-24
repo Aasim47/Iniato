@@ -1,6 +1,5 @@
 package com.backend.iniato.controller;
 
-
 import com.backend.iniato.dto.DriverLocationUpdateDTO;
 import com.backend.iniato.services.DriverLocationService;
 import lombok.RequiredArgsConstructor;
@@ -18,3 +17,4 @@ public class DriverLocationWebSocketController {
         driverLocationService.updateDriverLocation(dto);
     }
 }
+ 

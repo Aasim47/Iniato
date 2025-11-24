@@ -21,15 +21,29 @@ public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthFilter;
     private final AuthenticationProvider authenticationProvider;
-
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
                 .csrf(csrf -> csrf.disable())
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/**").permitAll()
+                        // Allow public access only to login/signup/OTP endpoints
+                        .requestMatchers(
+                                "/api/auth/**",     // login, OTP verification etc.
+                                "/api/public/**"    // any explicitly public endpoints
+                        ).permitAll()
+
+                        // Restrict driver endpoints to drivers only
+                        .requestMatchers("/api/rides/**").authenticated()
+
+
+
+                        // Restrict admin endpoints
                         .requestMatchers("/admin/**").hasRole("ADMIN")
+
+                        // Restrict user endpoints
                         .requestMatchers("/user/**").hasAnyRole("USER", "ADMIN")
+
+                        // Everything else must be authenticated
                         .anyRequest().authenticated()
                 )
                 .sessionManagement(sess -> sess.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -38,7 +52,6 @@ public class SecurityConfig {
 
         return http.build();
     }
-
 
 
 }

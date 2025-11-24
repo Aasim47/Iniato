@@ -66,15 +66,26 @@ public class User implements UserDetails {
 
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
-        // Create a completely independent collection
-        return this.roles.stream()
-                .map(role -> new SimpleGrantedAuthority( role.getRoleName()))
-                .collect(Collectors.toSet()); // Use List instead of Set
+        Set<SimpleGrantedAuthority> authorities = new HashSet<>();
+
+        if (roles != null) {
+            authorities.addAll(roles.stream()
+                    .map(role -> new SimpleGrantedAuthority(role.getRoleName()))
+                    .toList());
+        }
+
+        if (userType != null) {
+            authorities.add(new SimpleGrantedAuthority( userType.name()));
+        }
+
+        return authorities;
     }
+
     @Override
     public String getUsername() {
-        return email;
+        return email != null ? email : phoneNumber;
     }
+
 
     @Override
     public String getPassword() {

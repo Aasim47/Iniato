@@ -11,11 +11,7 @@ import java.util.Optional;
 
 public interface DriverLocationRepository extends JpaRepository<DriverLocation, Long> {
 
-    @Query(value = """
-        SELECT d.* FROM driver_locations d
-        WHERE d.online = true
-        AND ST_DWithin(d.current_location::geography, :pickup::geography, :radius)
-        """, nativeQuery = true)
+    @Query("SELECT d FROM DriverLocation d WHERE distance(d.currentLocation, :pickup) < :radius")
     List<DriverLocation> findNearbyDrivers(Point pickup, double radius);
 
 

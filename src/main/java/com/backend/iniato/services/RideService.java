@@ -1,6 +1,5 @@
 package com.backend.iniato.services;
 
-
 import com.backend.iniato.dto.RideRequestDTO;
 import com.backend.iniato.dto.RideResponseDTO;
 import com.backend.iniato.entity.Ride;
@@ -24,29 +23,47 @@ public class RideService {
     private final UserRepository userRepository;
 
     private User getCurrentUser() {
-        String email = SecurityContextHolder.getContext().getAuthentication().getName();
-        return userRepository.findByEmail(email)
+        String phone = SecurityContextHolder.getContext().getAuthentication().getName();
+        return userRepository.findByPhoneNumber(phone)
                 .orElseThrow(() -> new RuntimeException("User not found"));
     }
 
-    // 1. Passenger requests ride
-    public RideResponseDTO requestRide(RideRequestDTO requestDTO) {
+    /**
+     * Passenger requests to join a shared ride.
+     * If an existing ride matches the route, add the passenger to it.
+     * Else, create a new pooled ride.
+     */
+    public RideResponseDTO requestSharedRide(RideRequestDTO requestDTO) {
         User passenger = getCurrentUser();
 
-        Ride ride = Ride.builder()
-                .pickupLocation(requestDTO.getPickupLocaton())
-                .destination(requestDTO.getDestination())
-                .requestedTime(LocalDateTime.now())
-                .status(RideStatus.REQUESTED)
-                .passenger(passenger)
-                .build();
+        // 1️⃣ Find an existing active ride going in the same direction
+        List<Ride> potentialRides = rideRepository.findActiveRidesByRoute(
+                requestDTO.getPickupLocaton(), requestDTO.getDestination());
+
+        Ride ride;
+        if (!potentialRides.isEmpty()) {
+            // Join first available shared ride
+            ride = potentialRides.get(0);
+            ride.getPassengers().add(passenger);
+        } else {
+            // Create new ride
+            ride = Ride.builder()
+                    .pickupLocation(requestDTO.getPickupLocaton())
+                    .destination(requestDTO.getDestination())
+                    .requestedTime(LocalDateTime.now())
+                    .status(RideStatus.POOL_FORMING)
+                    .passengers(List.of(passenger))
+                    .build();
+        }
 
         rideRepository.save(ride);
         return toResponse(ride);
     }
 
-    // 2. Passenger views their rides
-    public List<RideResponseDTO> getPassengerRides() {
+    /**
+     * All rides the current passenger is part of.
+     */
+    public List<RideResponseDTO> getPassengerSharedRides() {
         User passenger = getCurrentUser();
         return rideRepository.findByPassenger(passenger)
                 .stream()
@@ -54,91 +71,115 @@ public class RideService {
                 .collect(Collectors.toList());
     }
 
-    // 3. Passenger cancels a ride
-    public RideResponseDTO cancelRide(Long rideId) {
+    /**
+     * Passenger leaves a pooled ride before it starts.
+     */
+    public RideResponseDTO leaveSharedRide(Long rideId) {
         User passenger = getCurrentUser();
         Ride ride = rideRepository.findById(rideId)
                 .orElseThrow(() -> new RuntimeException("Ride not found"));
 
-        if (!ride.getPassenger().equals(passenger)) {
-            throw new RuntimeException("Not authorized to cancel this ride");
+        if (!ride.getPassengers().contains(passenger)) {
+            throw new RuntimeException("You are not part of this ride");
         }
 
-        if (ride.getStatus() == RideStatus.COMPLETED || ride.getStatus() == RideStatus.CANCELLED) {
-            throw new RuntimeException("Cannot cancel completed or cancelled ride");
+        if (ride.getStatus() != RideStatus.POOL_FORMING) {
+            throw new RuntimeException("Cannot leave ride after it has started");
         }
 
-        ride.setStatus(RideStatus.CANCELLED);
+        ride.getPassengers().remove(passenger);
+
+        // If no passengers left, cancel the ride
+        if (ride.getPassengers().isEmpty()) {
+            ride.setStatus(RideStatus.CANCELLED);
+        }
+
         rideRepository.save(ride);
         return toResponse(ride);
     }
 
-    // 4. Driver views available rides
-    public List<RideResponseDTO> getAvailableRides() {
-        return rideRepository.findByStatus(RideStatus.REQUESTED)
+    /**
+     * Drivers can view available pooled rides that need a driver.
+     */
+    public List<RideResponseDTO> getAvailableSharedRides() {
+        return rideRepository.findByStatus(RideStatus.POOL_FORMING)
                 .stream()
                 .map(this::toResponse)
                 .collect(Collectors.toList());
     }
 
-    // 5. Driver accepts a ride
-    public RideResponseDTO acceptRide(Long rideId) {
+    /**
+     * Driver accepts to host a shared ride.
+     */
+    public RideResponseDTO acceptSharedRide(Long rideId) {
         User driver = getCurrentUser();
         Ride ride = rideRepository.findById(rideId)
                 .orElseThrow(() -> new RuntimeException("Ride not found"));
 
-        if (ride.getStatus() != RideStatus.REQUESTED) {
-            throw new RuntimeException("Ride already accepted or completed");
+        if (ride.getDriver() != null) {
+            throw new RuntimeException("Ride already has a driver assigned");
         }
 
         ride.setDriver(driver);
         ride.setAcceptedTime(LocalDateTime.now());
         ride.setStatus(RideStatus.ACCEPTED);
         rideRepository.save(ride);
+
         return toResponse(ride);
     }
 
-    // 6. Driver starts trip
-    public RideResponseDTO startRide(Long rideId) {
+    /**
+     * Driver starts the shared ride (after enough passengers join).
+     */
+    public RideResponseDTO startSharedRide(Long rideId) {
         User driver = getCurrentUser();
         Ride ride = rideRepository.findById(rideId)
                 .orElseThrow(() -> new RuntimeException("Ride not found"));
 
-        if (!ride.getDriver().equals(driver)) {
-            throw new RuntimeException("Not authorized to start this ride");
+        if (!driver.equals(ride.getDriver())) {
+            throw new RuntimeException("You are not authorized to start this ride");
+        }
+
+        if (ride.getPassengers().size() < 2) {
+            throw new RuntimeException("Minimum 2 passengers required to start pooling ride");
         }
 
         ride.setStartTime(LocalDateTime.now());
         ride.setStatus(RideStatus.STARTED);
         rideRepository.save(ride);
+
         return toResponse(ride);
     }
 
-    // 7. Driver completes trip
-    public RideResponseDTO completeRide(Long rideId) {
+    /**
+     * Ride completed — triggers fare split logic downstream.
+     */
+    public RideResponseDTO completeSharedRide(Long rideId) {
         User driver = getCurrentUser();
         Ride ride = rideRepository.findById(rideId)
                 .orElseThrow(() -> new RuntimeException("Ride not found"));
 
-        if (!ride.getDriver().equals(driver)) {
-            throw new RuntimeException("Not authorized to complete this ride");
+        if (!driver.equals(ride.getDriver())) {
+            throw new RuntimeException("Unauthorized driver");
         }
 
         ride.setEndTime(LocalDateTime.now());
         ride.setStatus(RideStatus.COMPLETED);
         rideRepository.save(ride);
+
         return toResponse(ride);
     }
 
     private RideResponseDTO toResponse(Ride ride) {
         return RideResponseDTO.builder()
                 .rideId(ride.getId())
-                .passengerEmail(ride.getPassenger().getEmail())
                 .driverEmail(ride.getDriver() != null ? ride.getDriver().getEmail() : null)
                 .pickupLocation(ride.getPickupLocation())
                 .destination(ride.getDestination())
                 .requestedTime(ride.getRequestedTime())
                 .status(ride.getStatus())
+                .passengers(ride.getPassengers()
+                        .stream().map(User::getPhoneNumber).collect(Collectors.toList()))
                 .build();
     }
 }

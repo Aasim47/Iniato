@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.*;
 @RequiredArgsConstructor
 public class AuthController {
 
+
     private final AuthService authService;
 
     @PostMapping("/register")
@@ -48,21 +49,52 @@ public class AuthController {
         return ResponseEntity.ok(response);
     }
 
+    @PostMapping("/register/rider/verify-otp")
+    public ResponseEntity<String> verifyRiderOtp(@RequestBody VerifyOtpRequest request) {
+        boolean isValid = authService.verifyOtp(request.getPhoneNumber(), request.getOtp());
+        if (isValid) {
+            return ResponseEntity.ok("OTP verified. You are now a rider for Iniato. Congratulations");
+        } else {
+            return ResponseEntity.badRequest().body("Invalid OTP");
+        }
+    }
+
+    @PostMapping("/register/rider/send-otp")
+    public ResponseEntity<String> sendRiderOtp(@RequestBody SendOtpRequest request) {
+        authService.sendOtp(request.getPhoneNumber());
+        return ResponseEntity.ok("OTP sent successfully");
+    }
+
     @PostMapping("/login")
     public ResponseEntity<AuthResponse> login(@RequestBody LoginRequest request) {
         AuthResponse response = authService.login(request);
         return ResponseEntity.ok(response);
     }
 
-    @PostMapping("/login/driver/{phoneNumber}")
-    public ResponseEntity<AuthResponse> loginDriver(@RequestBody LoginRequest request) {
-        AuthResponse response = authService.login(request);
+    @PostMapping("/login/send-otp")
+    public ResponseEntity<String> sendLoginOtp(@RequestBody SendOtpRequest request) {
+        authService.sendOtp(request.getPhoneNumber());
+        return ResponseEntity.ok("OTP sent successfully for login");
+    }
+
+    @PostMapping("/login/verify-otp")
+    public ResponseEntity<AuthResponse> verifyLoginOtp(@RequestBody VerifyOtpRequest request) {
+        boolean valid = authService.verifyOtp(request.getPhoneNumber(), request.getOtp());
+        if (!valid) return ResponseEntity.badRequest().body(null);
+
+        AuthResponse response = authService.loginWithOtp(request.getPhoneNumber());
         return ResponseEntity.ok(response);
     }
 
-    @PostMapping("/login/rider/{phoneNumber}")
-    public ResponseEntity<AuthResponse> loginRider(@RequestBody LoginRequest request) {
-        AuthResponse response = authService.login(request);
-        return ResponseEntity.ok(response);
+    @PostMapping("/logout")
+    public ResponseEntity<String> logout(@RequestHeader("Authorization") String authHeader) {
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            String token = authHeader.substring(7);
+            authService.logout(token);
+        }
+        return ResponseEntity.ok("Logged out successfully");
     }
+
+
+
 }

@@ -29,10 +29,13 @@ public class PassengerProfileService {
         PassengerProfile profile = passengerProfileRepository.findByUser(user)
                 .orElseThrow(() -> new RuntimeException("Profile not found"));
 
+        User user1 = profile.getUser();
+
+
         return PassengerProfileResponse.builder()
                 .email(user.getEmail())
                 .fullName(profile.getFullName())
-                .phoneNumber(profile.getPhoneNumber())
+                .phoneNumber(user1.getPhoneNumber())
                 .build();
     }
 
@@ -42,14 +45,14 @@ public class PassengerProfileService {
                 .orElse(PassengerProfile.builder().user(user).build());
 
         profile.setFullName(request.getFullName());
-        profile.setPhoneNumber(request.getPhoneNumber());
+        profile.getUser().setPhoneNumber(request.getPhoneNumber());
 
         passengerProfileRepository.save(profile);
 
         return PassengerProfileResponse.builder()
                 .email(user.getEmail())
                 .fullName(profile.getFullName())
-                .phoneNumber(profile.getPhoneNumber())
+                .phoneNumber(profile.getUser().getPhoneNumber())
                 .build();
     }
 }

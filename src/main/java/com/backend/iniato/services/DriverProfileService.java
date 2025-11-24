@@ -20,10 +20,14 @@ public class DriverProfileService {
     private final UserRepository userRepository;
 
     private User getCurrentUser() {
-        String email = SecurityContextHolder.getContext().getAuthentication().getName();
-        return userRepository.findByEmail(email)
+        String identifier = SecurityContextHolder.getContext().getAuthentication().getName();
+
+        System.out.println("this is identifier "+identifier);
+        return userRepository.findByEmail(identifier)
+                .or(() -> userRepository.findByPhoneNumber(identifier))
                 .orElseThrow(() -> new RuntimeException("User not found"));
     }
+
 
     public DriverProfileResponse getProfile() {
         User user = getCurrentUser();

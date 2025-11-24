@@ -6,6 +6,8 @@ import jakarta.persistence.*;
 import lombok.*;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Data
@@ -25,9 +27,14 @@ public class Ride {
     @Enumerated(EnumType.STRING)
     private RideStatus status;
 
-    @ManyToOne
-    @JoinColumn(name = "passenger_id", nullable = false)
-    private User passenger;
+    @ManyToMany(fetch = FetchType.LAZY)
+    @JoinTable(
+            name = "ride_passengers",
+            joinColumns = @JoinColumn(name = "ride_id"),
+            inverseJoinColumns = @JoinColumn(name = "passenger_id")
+    )
+    @Builder.Default
+    private List<User> passengers = new ArrayList<>();
 
     @ManyToOne
     @JoinColumn(name = "driver_id")

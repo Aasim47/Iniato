@@ -1,7 +1,7 @@
 package com.backend.iniato.controller;
 
-
 import com.backend.iniato.dto.NearbyDriverDTO;
+import com.backend.iniato.dto.RideMatchResponseDTO;
 import com.backend.iniato.dto.RideRequestDTO;
 import com.backend.iniato.entity.RideRequest;
 import com.backend.iniato.entity.User;
@@ -14,22 +14,23 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/rides")
+@RequestMapping("/api/matching")
 @RequiredArgsConstructor
 public class RideMatchingController {
 
     private final RideMatchingService rideMatchingService;
 
-    @PostMapping("/request-matching")
-    public ResponseEntity<RideRequest> requestRide(@RequestBody RideRequestDTO requestDTO,
-                                                   @AuthenticationPrincipal User passenger) {
+    @PostMapping("/request")
+    public ResponseEntity<RideRequest> createRideRequest(@RequestBody RideRequestDTO requestDTO,
+                                                         @AuthenticationPrincipal User passenger) {
         RideRequest rideRequest = rideMatchingService.saveRideRequest(requestDTO, passenger);
         return ResponseEntity.ok(rideRequest);
     }
 
-    @PostMapping("/match")
-    public ResponseEntity<List<NearbyDriverDTO>> findNearbyDrivers(@RequestBody RideRequestDTO requestDTO) {
-        List<NearbyDriverDTO> nearbyDrivers = rideMatchingService.findNearbyDrivers(requestDTO);
-        return ResponseEntity.ok(nearbyDrivers);
+    // 🔍 Find other passengers or available shared rides nearby
+    @PostMapping("/find")
+    public ResponseEntity<RideMatchResponseDTO> findSharedRideMatches(@RequestBody RideRequestDTO requestDTO) {
+        RideMatchResponseDTO response = rideMatchingService.findSharedRideMatches(requestDTO);
+        return ResponseEntity.ok(response);
     }
 }

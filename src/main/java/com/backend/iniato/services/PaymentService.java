@@ -3,7 +3,10 @@ package com.backend.iniato.services;
 import com.backend.iniato.dto.PaymentRequestDTO;
 import com.backend.iniato.dto.PaymentResponseDTO;
 import com.backend.iniato.entity.Payment;
+import com.backend.iniato.entity.Ride;
+import com.backend.iniato.entity.User;
 import com.backend.iniato.repo.PaymentRepository;
+import com.backend.iniato.repo.RideRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -14,23 +17,33 @@ import java.time.LocalDateTime;
 public class PaymentService {
 
     private final PaymentRepository paymentRepository;
+    private final RideRepository rideRepository;
 
-    public PaymentResponseDTO processPayment(PaymentRequestDTO request) {
-        // mock payment logic for now
-        String status = "SUCCESS";
-        String message = "Payment successful";
+    /**
+     * Split fare equally among passengers for a completed shared ride
+     */
+    public PaymentResponseDTO splitSharedFare(PaymentRequestDTO request) {
+        Ride ride = rideRepository.findById(request.getRideId())
+                .orElseThrow(() -> new RuntimeException("Ride not found"));
 
-        Payment payment = Payment.builder()
-                .ride(com.backend.iniato.entity.Ride.builder().id(request.getRideId()).build())
-                .passenger(com.backend.iniato.entity.User.builder().id(request.getPassengerId()).build())
-                .amount(request.getAmount())
-                .paymentMethod(request.getPaymentMethod())
-                .status(status)
-                .timestamp(LocalDateTime.now())
-                .build();
+        int passengerCount = ride.getPassengers().size();
+        double splitAmount = request.getAmount() / passengerCount;
 
-        paymentRepository.save(payment);
+        for (User passenger : ride.getPassengers()) {
+            Payment payment = Payment.builder()
+                    .ride(ride)
+                    .passenger(passenger)
+                    .amount(splitAmount)
+                    .paymentMethod(request.getPaymentMethod())
+                    .status("SUCCESS")
+                    .timestamp(LocalDateTime.now())
+                    .build();
 
-        return new PaymentResponseDTO(status, message, request.getAmount());
+            paymentRepository.save(payment);
+        }
+
+        return new PaymentResponseDTO("SUCCESS",
+                "Fare split among " + passengerCount + " passengers",
+                request.getAmount());
     }
 }

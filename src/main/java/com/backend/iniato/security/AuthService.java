@@ -146,8 +146,19 @@ public class AuthService {
     }
 
 
+    public AuthResponse loginWithOtp(String phoneNumber) {
+        User user = userRepository.findByPhoneNumber(phoneNumber)
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+        var jwtToken = jwtService.generateToken(user);
+        return AuthResponse.builder()
+                .token(jwtToken)
+                .email(user.getEmail())
+                .roles(user.getRoles().stream().map(Role::getRoleName).toList())
+                .build();
+    }
+
     public AuthResponse registerRider(RiderRegisterRequest request, String phoneNumber) {
-        // 1. Check if user already exists
         if (userRepository.findByPhoneNumber(phoneNumber).isPresent()) {
             throw new IllegalArgumentException("Phone number already in use");
         }
@@ -162,7 +173,6 @@ public class AuthService {
                 .userType(User.UserType.RIDER)
                 .build();
 
-        // 3. Save user to DB
 
 
         userRepository.save(user);
@@ -210,4 +220,9 @@ public class AuthService {
                 .roles(roleNames)
                 .build();
     }
+
+    public void logout(String token) {
+        jwtService.revokeToken(token); // store in blacklist
+    }
+
 }

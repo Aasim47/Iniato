@@ -31,4 +31,7 @@ public class RideRequest {
     private LocalDateTime pickupTime;
 
     private String status;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    private Ride matchedRide;
 }

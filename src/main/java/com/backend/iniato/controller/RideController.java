@@ -1,8 +1,6 @@
 package com.backend.iniato.controller;
 
-
-import com.backend.iniato.dto.RideRequestDTO;
-import com.backend.iniato.dto.RideResponseDTO;
+import com.backend.iniato.dto.*;
 import com.backend.iniato.services.RideService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -18,52 +16,49 @@ public class RideController {
 
     private final RideService rideService;
 
-    // 🚖 Passenger books a ride
     @PostMapping("/request")
-    @PreAuthorize("hasRole('PASSENGER')")
+    @PreAuthorize("hasAuthority('PASSENGER')")
     public ResponseEntity<RideResponseDTO> requestRide(@RequestBody RideRequestDTO requestDTO) {
-        return ResponseEntity.ok(rideService.requestRide(requestDTO));
+        return ResponseEntity.ok(rideService.requestSharedRide(requestDTO));
     }
 
-    // 👤 Passenger views their rides
     @GetMapping("/my")
-    @PreAuthorize("hasRole('PASSENGER')")
-    public ResponseEntity<List<RideResponseDTO>> getPassengerRides() {
-        return ResponseEntity.ok(rideService.getPassengerRides());
+    @PreAuthorize("hasAuthority('PASSENGER')")
+    public ResponseEntity<List<RideResponseDTO>> getMySharedRides() {
+        return ResponseEntity.ok(rideService.getPassengerSharedRides());
     }
 
-    // ❌ Passenger cancels a ride
-    @PostMapping("/{rideId}/cancel")
-    @PreAuthorize("hasRole('PASSENGER')")
-    public ResponseEntity<RideResponseDTO> cancelRide(@PathVariable Long rideId) {
-        return ResponseEntity.ok(rideService.cancelRide(rideId));
+    @PostMapping("/{rideId}/leave")
+    @PreAuthorize("hasAuthority('PASSENGER')")
+    public ResponseEntity<RideResponseDTO> leaveSharedRide(@PathVariable Long rideId) {
+        return ResponseEntity.ok(rideService.leaveSharedRide(rideId));
     }
 
-    // 🚗 Driver views available rides
+    // 🚕 Driver views nearby pooled ride requests that match their route
     @GetMapping("/available")
-    @PreAuthorize("hasRole('DRIVER')")
-    public ResponseEntity<List<RideResponseDTO>> getAvailableRides() {
-        return ResponseEntity.ok(rideService.getAvailableRides());
+    @PreAuthorize("hasAuthority('DRIVER')")
+    public ResponseEntity<List<RideResponseDTO>> getAvailableSharedRides() {
+        return ResponseEntity.ok(rideService.getAvailableSharedRides());
     }
 
-    // ✅ Driver accepts ride
+    // ✅ Driver accepts to host a pooled ride
     @PostMapping("/{rideId}/accept")
-    @PreAuthorize("hasRole('DRIVER')")
-    public ResponseEntity<RideResponseDTO> acceptRide(@PathVariable Long rideId) {
-        return ResponseEntity.ok(rideService.acceptRide(rideId));
+    @PreAuthorize("hasAuthority('DRIVER')")
+    public ResponseEntity<RideResponseDTO> acceptSharedRide(@PathVariable Long rideId) {
+        return ResponseEntity.ok(rideService.acceptSharedRide(rideId));
     }
 
-    // ▶️ Driver starts ride
+    // ▶️ Driver starts the pooled ride (once minimum passengers are onboard)
     @PostMapping("/{rideId}/start")
-    @PreAuthorize("hasRole('DRIVER')")
-    public ResponseEntity<RideResponseDTO> startRide(@PathVariable Long rideId) {
-        return ResponseEntity.ok(rideService.startRide(rideId));
+    @PreAuthorize("hasAuthority('DRIVER')")
+    public ResponseEntity<RideResponseDTO> startSharedRide(@PathVariable Long rideId) {
+        return ResponseEntity.ok(rideService.startSharedRide(rideId));
     }
 
-    // 🏁 Driver completes ride
+    // 🏁 Driver completes the shared ride (fare split occurs automatically)
     @PostMapping("/{rideId}/complete")
-    @PreAuthorize("hasRole('DRIVER')")
-    public ResponseEntity<RideResponseDTO> completeRide(@PathVariable Long rideId) {
-        return ResponseEntity.ok(rideService.completeRide(rideId));
+    @PreAuthorize("hasAuthority('DRIVER')")
+    public ResponseEntity<RideResponseDTO> completeSharedRide(@PathVariable Long rideId) {
+        return ResponseEntity.ok(rideService.completeSharedRide(rideId));
     }
 }

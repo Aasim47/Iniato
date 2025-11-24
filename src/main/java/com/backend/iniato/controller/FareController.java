@@ -14,9 +14,10 @@ public class FareController {
 
     private final FareCalculationService fareCalculationService;
 
+    // 🧮 Estimate fare for shared ride (split among passengers)
     @PostMapping("/estimate")
-    public ResponseEntity<FareEstimateResponseDTO> estimateFare(@RequestBody FareEstimateRequestDTO request) {
-        FareEstimateResponseDTO response = fareCalculationService.calculateFare(request);
+    public ResponseEntity<FareEstimateResponseDTO> estimateSharedFare(@RequestBody FareEstimateRequestDTO request) {
+        FareEstimateResponseDTO response = fareCalculationService.calculateSharedFare(request);
         return ResponseEntity.ok(response);
     }
 }

@@ -1,6 +1,5 @@
 package com.backend.iniato.controller;
 
-
 import com.backend.iniato.dto.PaymentRequestDTO;
 import com.backend.iniato.dto.PaymentResponseDTO;
 import com.backend.iniato.services.PaymentService;
@@ -15,9 +14,9 @@ public class PaymentController {
 
     private final PaymentService paymentService;
 
-    @PostMapping("/process")
-    public ResponseEntity<PaymentResponseDTO> processPayment(@RequestBody PaymentRequestDTO request) {
-        PaymentResponseDTO response = paymentService.processPayment(request);
+    @PostMapping("/split")
+    public ResponseEntity<PaymentResponseDTO> splitFare(@RequestBody PaymentRequestDTO request) {
+        PaymentResponseDTO response = paymentService.splitSharedFare(request);
         return ResponseEntity.ok(response);
     }
 }
