@@ -14,7 +14,6 @@ import java.util.List;
 @RequiredArgsConstructor
 public class RideController {
 
-
     private final RideService rideService;
 
     @PostMapping("/request")
