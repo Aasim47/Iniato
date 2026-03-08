@@ -2,12 +2,15 @@ package com.backend.iniato.services;
 
 import com.backend.iniato.dto.RideRequestDTO;
 import com.backend.iniato.dto.RideResponseDTO;
+import com.backend.iniato.dto.RiderBookRouteRequest;
+import com.backend.iniato.entity.Booking;
 import com.backend.iniato.entity.Ride;
 import com.backend.iniato.entity.User;
 import com.backend.iniato.enums.RideStatus;
 import com.backend.iniato.repo.RideRepository;
 import com.backend.iniato.repo.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
@@ -19,7 +22,9 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class RideService {
 
+    @Autowired
     private final RideRepository rideRepository;
+    @Autowired
     private final UserRepository userRepository;
 
     private User getCurrentUser() {
@@ -65,7 +70,7 @@ public class RideService {
      */
     public List<RideResponseDTO> getPassengerSharedRides() {
         User passenger = getCurrentUser();
-        return rideRepository.findByPassenger(passenger)
+        return rideRepository.findByPassengers(passenger)
                 .stream()
                 .map(this::toResponse)
                 .collect(Collectors.toList());
@@ -168,6 +173,16 @@ public class RideService {
         rideRepository.save(ride);
 
         return toResponse(ride);
+    }
+
+    public Booking bookRoute(RiderBookRouteRequest request) {
+        // Implementation for booking a route
+        return null;
+    }
+
+    public boolean cancelBooking(String bookingId) {
+        // Implementation for canceling a booking
+        return false;
     }
 
     private RideResponseDTO toResponse(Ride ride) {
