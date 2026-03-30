@@ -6,16 +6,21 @@ import com.backend.iniato.dto.DriverProfileResponse;
 import com.backend.iniato.enums.DriverStatus;
 import com.backend.iniato.services.DriverProfileService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/driver")
-@RequiredArgsConstructor
 public class DriverProfileController {
 
     private final DriverProfileService driverProfileService;
+
+    @Autowired
+    public DriverProfileController(DriverProfileService driverProfileService) {
+        this.driverProfileService = driverProfileService;
+    }
 
     @GetMapping("/profile")
     @PreAuthorize("hasAuthority('DRIVER')")

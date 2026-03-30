@@ -29,7 +29,7 @@ public class SecurityConfig {
                         // Allow public access only to login/signup/OTP endpoints
                         .requestMatchers(
                                 "/api/auth/**",     // login, OTP verification etc.
-                                "/api/public/**"    // any explicitly public endpoints
+                                "/api/**"    // any explicitly public endpoints
                         ).permitAll()
 
                         // Restrict driver endpoints to drivers only

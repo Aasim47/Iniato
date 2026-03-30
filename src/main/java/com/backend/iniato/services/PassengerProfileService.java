@@ -8,19 +8,27 @@ import com.backend.iniato.entity.User;
 import com.backend.iniato.repo.PassengerProfileRepository;
 import com.backend.iniato.repo.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 @Service
-@RequiredArgsConstructor
+
 public class PassengerProfileService {
 
     private final PassengerProfileRepository passengerProfileRepository;
     private final UserRepository userRepository;
 
+    @Autowired
+    public PassengerProfileService(PassengerProfileRepository passengerProfileRepository, UserRepository userRepository) {
+        this.passengerProfileRepository = passengerProfileRepository;
+        this.userRepository = userRepository;
+    }
+
     private User getCurrentUser() {
-        String email = SecurityContextHolder.getContext().getAuthentication().getName();
-        return userRepository.findByEmail(email)
+        String identifier = SecurityContextHolder.getContext().getAuthentication().getName();
+        return userRepository.findByEmail(identifier)
+                .or(() -> userRepository.findByPhoneNumber(identifier))
                 .orElseThrow(() -> new RuntimeException("User not found"));
     }
 

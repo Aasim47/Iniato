@@ -2,42 +2,21 @@ package com.backend.iniato.controller;
 
 import com.backend.iniato.dto.*;
 import com.backend.iniato.security.AuthService;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.beans.factory.annotation.Autowired;
 
 @RestController
 @RequestMapping("/api/auth")
 public class AuthController {
     private final AuthService authService;
+
     @Autowired
     public AuthController(AuthService authService) {
         this.authService = authService;
     }
 
-    @PostMapping("/register")
-    public ResponseEntity<AuthResponse> register(@RequestBody BaseRegisterRequest request) {
-        AuthResponse response = authService.register(request);
-        return ResponseEntity.ok(response);
-    }
-
-    @PostMapping("/register/driver/{phoneNumber}")
-    public ResponseEntity<AuthResponse> registerdriver(@RequestBody DriverRegisterRequest request, @PathVariable String phoneNumber) {
-        AuthResponse response = authService.registerDriver(request,phoneNumber);
-        return ResponseEntity.ok(response);
-    }
-
-
-    @PostMapping("/register/driver/verify-otp")
-    public ResponseEntity<String> verifyDriverOtp(@RequestBody VerifyOtpRequest request) {
-        boolean isValid = authService.verifyOtp(request.getPhoneNumber(), request.getOtp());
-        if (isValid) {
-            return ResponseEntity.ok("OTP verified. You are now a driver for Iniato. Congratulations");
-        } else {
-            return ResponseEntity.badRequest().body("Invalid OTP");
-        }
-    }
+    // ─── Driver Registration (OTP-based) ────────────────────────────────────
 
     @PostMapping("/register/driver/send-otp")
     public ResponseEntity<String> sendDriverOtp(@RequestBody SendOtpRequest request) {
@@ -45,21 +24,24 @@ public class AuthController {
         return ResponseEntity.ok("OTP sent successfully");
     }
 
-    @PostMapping("/register/rider/{phoneNumber}")
-    public ResponseEntity<AuthResponse> registerrider(@RequestBody RiderRegisterRequest request, @PathVariable String phoneNumber) {
-        AuthResponse response = authService.registerRider(request,phoneNumber);
-        return ResponseEntity.ok(response);
-    }
-
-    @PostMapping("/register/rider/verify-otp")
-    public ResponseEntity<String> verifyRiderOtp(@RequestBody VerifyOtpRequest request) {
+    @PostMapping("/register/driver/verify-otp")
+    public ResponseEntity<String> verifyDriverOtp(@RequestBody VerifyOtpRequest request) {
         boolean isValid = authService.verifyOtp(request.getPhoneNumber(), request.getOtp());
         if (isValid) {
-            return ResponseEntity.ok("OTP verified. You are now a rider for Iniato. Congratulations");
+            return ResponseEntity.ok("OTP verified. You can now complete registration.");
         } else {
             return ResponseEntity.badRequest().body("Invalid OTP");
         }
     }
+
+    @PostMapping("/register/driver/{phoneNumber}")
+    public ResponseEntity<AuthResponse> registerDriver(@RequestBody DriverRegisterRequest request,
+                                                        @PathVariable String phoneNumber) {
+        AuthResponse response = authService.registerDriver(request, phoneNumber);
+        return ResponseEntity.ok(response);
+    }
+
+    // ─── Rider Registration (OTP-based) ─────────────────────────────────────
 
     @PostMapping("/register/rider/send-otp")
     public ResponseEntity<String> sendRiderOtp(@RequestBody SendOtpRequest request) {
@@ -67,11 +49,24 @@ public class AuthController {
         return ResponseEntity.ok("OTP sent successfully");
     }
 
-    @PostMapping("/login")
-    public ResponseEntity<AuthResponse> login(@RequestBody LoginRequest request) {
-        AuthResponse response = authService.login(request);
+    @PostMapping("/register/rider/verify-otp")
+    public ResponseEntity<String> verifyRiderOtp(@RequestBody VerifyOtpRequest request) {
+        boolean isValid = authService.verifyOtp(request.getPhoneNumber(), request.getOtp());
+        if (isValid) {
+            return ResponseEntity.ok("OTP verified. You can now complete registration.");
+        } else {
+            return ResponseEntity.badRequest().body("Invalid OTP");
+        }
+    }
+
+    @PostMapping("/register/rider/{phoneNumber}")
+    public ResponseEntity<AuthResponse> registerRider(@RequestBody RiderRegisterRequest request,
+                                                       @PathVariable String phoneNumber) {
+        AuthResponse response = authService.registerRider(request, phoneNumber);
         return ResponseEntity.ok(response);
     }
+
+    // ─── Login (OTP-based only) ─────────────────────────────────────────────
 
     @PostMapping("/login/send-otp")
     public ResponseEntity<String> sendLoginOtp(@RequestBody SendOtpRequest request) {
@@ -82,11 +77,14 @@ public class AuthController {
     @PostMapping("/login/verify-otp")
     public ResponseEntity<AuthResponse> verifyLoginOtp(@RequestBody VerifyOtpRequest request) {
         boolean valid = authService.verifyOtp(request.getPhoneNumber(), request.getOtp());
-        if (!valid) return ResponseEntity.badRequest().body(null);
-
+        if (!valid) {
+            return ResponseEntity.badRequest().body(null);
+        }
         AuthResponse response = authService.loginWithOtp(request.getPhoneNumber());
         return ResponseEntity.ok(response);
     }
+
+    // ─── Logout ─────────────────────────────────────────────────────────────
 
     @PostMapping("/logout")
     public ResponseEntity<String> logout(@RequestHeader("Authorization") String authHeader) {
@@ -96,7 +94,4 @@ public class AuthController {
         }
         return ResponseEntity.ok("Logged out successfully");
     }
-
-
-
 }

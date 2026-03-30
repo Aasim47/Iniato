@@ -29,6 +29,43 @@ public class DriverLocation {
 
     private LocalDateTime lastUpdated;
 
+    public Long getId() {
+        return id;
+    }
 
+    public void setId(Long id) {
+        this.id = id;
+    }
 
+    public User getDriver() {
+        return driver;
+    }
+
+    public void setDriver(User driver) {
+        this.driver = driver;
+    }
+
+    public Point getCurrentLocation() {
+        return currentLocation;
+    }
+
+    public void setCurrentLocation(Point currentLocation) {
+        this.currentLocation = currentLocation;
+    }
+
+    public boolean isOnline() {
+        return online;
+    }
+
+    public void setOnline(boolean online) {
+        this.online = online;
+    }
+
+    public LocalDateTime getLastUpdated() {
+        return lastUpdated;
+    }
+
+    public void setLastUpdated(LocalDateTime lastUpdated) {
+        this.lastUpdated = lastUpdated;
+    }
 }

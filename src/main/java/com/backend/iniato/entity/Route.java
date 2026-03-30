@@ -1,15 +1,27 @@
 package com.backend.iniato.entity;
 
 import jakarta.persistence.*;
+import lombok.*;
+
 import java.time.LocalDateTime;
-import java.util.UUID;
 
 @Entity
 @Table(name = "routes")
+@Getter
+@Setter
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
 public class Route {
+
     @Id
-    private UUID id;
-    private UUID driverId;
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "driver_id")
+    private User driver;
+
     private Double originLat;
     private Double originLng;
     private Double destinationLat;
@@ -17,12 +29,12 @@ public class Route {
     private String polyline;
     private Integer totalSeats;
     private Integer availableSeats;
-    private String status;
+    private String status; // ACTIVE, COMPLETED, CANCELLED
     private LocalDateTime startTime;
     private LocalDateTime createdAt;
 
-    public Integer getAvailableSeats() {
-        return availableSeats;
+    @PrePersist
+    protected void onCreate() {
+        createdAt = LocalDateTime.now();
     }
-    // getters/setters for other fields
 }

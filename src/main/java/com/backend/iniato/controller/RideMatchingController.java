@@ -7,6 +7,7 @@ import com.backend.iniato.entity.RideRequest;
 import com.backend.iniato.entity.User;
 import com.backend.iniato.services.RideMatchingService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
@@ -15,10 +16,14 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/matching")
-@RequiredArgsConstructor
 public class RideMatchingController {
 
     private final RideMatchingService rideMatchingService;
+
+    @Autowired
+    public RideMatchingController(RideMatchingService rideMatchingService) {
+        this.rideMatchingService = rideMatchingService;
+    }
 
     @PostMapping("/request")
     public ResponseEntity<RideRequest> createRideRequest(@RequestBody RideRequestDTO requestDTO,

@@ -28,18 +28,17 @@ public class User implements UserDetails {
     @Column(name = "user_id")
     private Long id;
 
-    @Column(unique = true,nullable = true)
+    @Column(unique = true, nullable = true)
     private String email;
 
-    @Column
+    @Column(nullable = true)
     private String password;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "user_type", nullable = false)
     private UserType userType;
 
-
-    @Column(name = "phone_Number", nullable = false)
+    @Column(name = "phone_number", unique = true, nullable = false)
     private String phoneNumber;
 
 
@@ -70,7 +69,7 @@ public class User implements UserDetails {
 
         if (roles != null) {
             authorities.addAll(roles.stream()
-                    .map(role -> new SimpleGrantedAuthority(role.getRoleName()))
+                    .map(role -> new SimpleGrantedAuthority(role.getAuthority()))
                     .toList());
         }
 
@@ -113,7 +112,7 @@ public class User implements UserDetails {
     }
 
     public enum UserType {
-        RIDER,
+        PASSENGER,
         DRIVER
     }
 }

@@ -34,4 +34,6 @@ public class RideRequest {
 
     @ManyToOne(fetch = FetchType.LAZY)
     private Ride matchedRide;
+
+
 }

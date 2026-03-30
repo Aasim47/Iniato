@@ -1,18 +1,27 @@
 package com.backend.iniato.entity;
 
-import javax.persistence.*;
-import java.util.UUID;
+import jakarta.persistence.*;
+import lombok.*;
 
 @Entity
 @Table(name = "route_stops")
+@Getter
+@Setter
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
 public class RouteStop {
+
     @Id
-    private UUID id;
-    private UUID routeId;
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "route_id")
+    private Route route;
+
     private Double lat;
     private Double lng;
-    private String type; // pickup/drop
+    private String type; // PICKUP, DROP
     private Integer sequenceOrder;
-    // getters/setters
 }
-
