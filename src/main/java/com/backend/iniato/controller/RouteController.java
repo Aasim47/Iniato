@@ -89,4 +89,25 @@ public class RouteController {
     public ResponseEntity<RouteResponseDTO> completeRoute(@PathVariable Long id) {
         return ResponseEntity.ok(routeService.completeRoute(id, getCurrentUser()));
     }
+
+    /**
+     * Driver cancels/abandons a route before the ride starts.
+     * DELETE /api/routes/{id}/cancel
+     */
+    @DeleteMapping("/{id}/cancel")
+    @PreAuthorize("hasAuthority('DRIVER')")
+    public ResponseEntity<Void> cancelRoute(@PathVariable Long id) {
+        routeService.cancelRoute(id, getCurrentUser());
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * Driver retrieves all their routes (active + history).
+     * GET /api/routes/my
+     */
+    @GetMapping("/my")
+    @PreAuthorize("hasAuthority('DRIVER')")
+    public ResponseEntity<List<RouteResponseDTO>> getMyRoutes() {
+        return ResponseEntity.ok(routeService.getMyRoutes(getCurrentUser()));
+    }
 }

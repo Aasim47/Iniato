@@ -6,7 +6,6 @@ import com.backend.iniato.entity.DriverLocation;
 import com.backend.iniato.entity.User;
 import com.backend.iniato.repo.DriverLocationRepository;
 import com.backend.iniato.repo.UserRepository;
-import lombok.RequiredArgsConstructor;
 import org.locationtech.jts.geom.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -18,20 +17,24 @@ import java.time.LocalDateTime;
 
 public class DriverLocationService {
 
+    private static final int SRID = 4326;
     private final DriverLocationRepository driverLocationRepository;
     private final SimpMessagingTemplate messagingTemplate;
-    private final GeometryFactory geometryFactory = new GeometryFactory();
-    @Autowired
-    private UserRepository userRepository;
+    private final UserRepository userRepository;
+    private final GeometryFactory geometryFactory = new GeometryFactory(new PrecisionModel(), SRID);
 
     @Autowired
-    public DriverLocationService(DriverLocationRepository driverLocationRepository, SimpMessagingTemplate messagingTemplate) {
+    public DriverLocationService(DriverLocationRepository driverLocationRepository,
+                                 SimpMessagingTemplate messagingTemplate,
+                                 UserRepository userRepository) {
         this.driverLocationRepository = driverLocationRepository;
         this.messagingTemplate = messagingTemplate;
+        this.userRepository = userRepository;
     }
 
     public void updateDriverLocation(DriverLocationUpdateDTO dto) {
         Point point = geometryFactory.createPoint(new Coordinate(dto.getLongitude(), dto.getLatitude()));
+        point.setSRID(SRID);
 
         User driver = userRepository.findById(dto.getDriverId())
                 .orElseThrow(() -> new RuntimeException("Driver not found"));

@@ -7,5 +7,6 @@ public class RouteCreateRequest {
     public double destinationLat;
     public double destinationLng;
     public int totalSeats;
+    public String originAddress;      // human-readable origin name (optional)
+    public String destinationAddress; // human-readable destination name (optional)
 }
-

@@ -26,12 +26,17 @@ public class Route {
     private Double originLng;
     private Double destinationLat;
     private Double destinationLng;
+    private String originAddress;       // human-readable start name
+    private String destinationAddress;  // human-readable end name
     private String polyline;
     private Integer totalSeats;
     private Integer availableSeats;
     private String status; // ACTIVE, COMPLETED, CANCELLED
     private LocalDateTime startTime;
+    private LocalDateTime endTime;       // when the route was completed/cancelled
+    private LocalDateTime completedAt;   // alias kept for DTO compatibility
     private LocalDateTime createdAt;
+    private Double totalEarnings;        // sum of all fareShare amounts for this route
 
     @PrePersist
     protected void onCreate() {

@@ -28,6 +28,12 @@ public class RideRequest {
     @Column(columnDefinition = "geometry(Point, 4326)")
     private Point destinationLocation;
 
+    /** Human-readable name of the passenger's own boarding point (e.g. "Sambalpur Market"). */
+    private String pickupLocationName;
+
+    /** Human-readable name of the passenger's own drop-off point. */
+    private String destinationName;
+
     private LocalDateTime pickupTime;
 
     private String status;

@@ -8,4 +8,6 @@ public class DriverProfileRequest {
     private String phoneNumber;
     private String vehicleRegistration;
     private String licenseNumber;
+    /** AUTO_RICKSHAW, BIKE, CAR, MINI_TRUCK */
+    private String vehicleType;
 }

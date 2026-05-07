@@ -35,12 +35,16 @@ public class DriverProfileService {
                 .orElseThrow(() -> new RuntimeException("Profile not found"));
 
         return DriverProfileResponse.builder()
+                .userId(user.getId())
                 .email(user.getEmail())
                 .fullName(profile.getFullName())
                 .phoneNumber(profile.getPhoneNumber())
                 .vehicleRegistration(profile.getVehicleRegistration())
                 .licenseNumber(profile.getLicenseNumber())
+                .vehicleType(profile.getVehicleType())
                 .status(profile.getStatus())
+                .averageRating(profile.getAverageRating())
+                .ratingCount(profile.getRatingCount())
                 .build();
     }
 
@@ -53,6 +57,9 @@ public class DriverProfileService {
         profile.setPhoneNumber(request.getPhoneNumber());
         profile.setVehicleRegistration(request.getVehicleRegistration());
         profile.setLicenseNumber(request.getLicenseNumber());
+        if (request.getVehicleType() != null) {
+            profile.setVehicleType(request.getVehicleType());
+        }
 
         driverProfileRepository.save(profile);
 

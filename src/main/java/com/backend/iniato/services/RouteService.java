@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -22,10 +23,7 @@ public class RouteService {
     private final RidePassengerRepository ridePassengerRepository;
     private final FareRepository fareRepository;
     private final NotificationService notificationService;
-
-    private static final double BASE_FARE = 20.0;
-    private static final double PRICE_PER_KM = 10.0;
-    private static final double POOL_DISCOUNT = 0.15;
+    private final FareCalculationService fareCalculationService;
 
     @Autowired
     public RouteService(RouteRepository routeRepository,
@@ -33,18 +31,18 @@ public class RouteService {
                         RideRepository rideRepository,
                         RidePassengerRepository ridePassengerRepository,
                         FareRepository fareRepository,
-                        NotificationService notificationService) {
+                        NotificationService notificationService,
+                        FareCalculationService fareCalculationService) {
         this.routeRepository = routeRepository;
         this.routeStopRepository = routeStopRepository;
         this.rideRepository = rideRepository;
         this.ridePassengerRepository = ridePassengerRepository;
         this.fareRepository = fareRepository;
         this.notificationService = notificationService;
+        this.fareCalculationService = fareCalculationService;
     }
 
-    /**
-     * Driver declares a new route. Creates Route + linked Ride session, broadcasts to nearby riders.
-     */
+    /** Driver declares a new route. Creates Route + linked Ride, broadcasts to nearby riders. */
     @Transactional
     public RouteResponseDTO createRoute(RouteCreateRequest request, User driver) {
         Route route = Route.builder()
@@ -53,6 +51,8 @@ public class RouteService {
                 .originLng(request.originLng)
                 .destinationLat(request.destinationLat)
                 .destinationLng(request.destinationLng)
+                .originAddress(request.originAddress)
+                .destinationAddress(request.destinationAddress)
                 .totalSeats(request.totalSeats)
                 .availableSeats(request.totalSeats)
                 .status("ACTIVE")
@@ -63,6 +63,8 @@ public class RouteService {
         Ride ride = Ride.builder()
                 .driver(driver)
                 .route(route)
+                .pickupLocation(request.originAddress)
+                .destination(request.destinationAddress)
                 .requestedTime(LocalDateTime.now())
                 .status(RideStatus.POOL_FORMING)
                 .build();
@@ -73,34 +75,22 @@ public class RouteService {
         return dto;
     }
 
-    /**
-     * Find active routes within ~800m corridor of the rider's location.
-     */
+    /** Find active routes within ~800 m of the rider's location. */
     @Transactional(readOnly = true)
     public List<RouteResponseDTO> getNearbyRoutes(double lat, double lng) {
-        double delta = 0.007; // ~800m bounding box
+        double delta = 0.007;
         return routeRepository.findActiveRoutesNear(lat, lng, delta).stream()
-                .map(r -> {
-                    Long rideId = rideRepository.findByRoute(r)
-                            .map(Ride::getId)
-                            .orElse(null);
-                    return toResponse(r, rideId);
-                })
+                .map(r -> toResponse(r, rideRepository.findByRoute(r).map(Ride::getId).orElse(null)))
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Driver updates their current location — broadcasts to passengers on the active ride.
-     */
+    /** Driver updates their current location — broadcasts to passengers on the active ride. */
     @Transactional(readOnly = true)
     public void updateLocation(Long routeId, RouteUpdateLocationRequest request, User driver) {
         Route route = routeRepository.findById(routeId)
                 .orElseThrow(() -> new RuntimeException("Route not found"));
-
-        if (!route.getDriver().getId().equals(driver.getId())) {
+        if (!route.getDriver().getId().equals(driver.getId()))
             throw new RuntimeException("Unauthorized: not your route");
-        }
-
         rideRepository.findByRoute(route).ifPresent(ride -> {
             DriverLocationUpdateEvent event = new DriverLocationUpdateEvent();
             event.driverId = String.valueOf(driver.getId());
@@ -110,17 +100,138 @@ public class RouteService {
         });
     }
 
+    /** Returns all routes (active + completed) for the current driver. */
+    @Transactional(readOnly = true)
+    public List<RouteResponseDTO> getMyRoutes(User driver) {
+        return routeRepository.findByDriver(driver).stream()
+                .map(r -> toResponse(r, rideRepository.findByRoute(r).map(Ride::getId).orElse(null)))
+                .collect(Collectors.toList());
+    }
+
     /**
-     * Driver adds a pickup/drop stop to their route.
+     * Driver cancels a route before it starts.
+     * Broadcasts ROUTE_CANCELLED so waiting riders see the card removed.
      */
+    @Transactional
+    public void cancelRoute(Long routeId, User driver) {
+        Route route = routeRepository.findById(routeId)
+                .orElseThrow(() -> new RuntimeException("Route not found"));
+        if (!route.getDriver().getId().equals(driver.getId()))
+            throw new RuntimeException("Unauthorized: not your route");
+
+        LocalDateTime now = LocalDateTime.now();
+        route.setStatus("CANCELLED");
+        route.setEndTime(now);
+        route.setCompletedAt(now);
+        routeRepository.save(route);
+
+        rideRepository.findByRoute(route).ifPresent(ride -> {
+            ride.setStatus(RideStatus.CANCELLED);
+            rideRepository.save(ride);
+            // Mark pending/confirmed passengers as LEFT
+            ridePassengerRepository.findByRide(ride).forEach(rp -> {
+                if (rp.getStatus() == RidePassengerStatus.PENDING
+                        || rp.getStatus() == RidePassengerStatus.CONFIRMED) {
+                    rp.setStatus(RidePassengerStatus.LEFT);
+                    ridePassengerRepository.save(rp);
+                }
+            });
+            RideCancelledEvent event = new RideCancelledEvent();
+            event.rideId = String.valueOf(ride.getId());
+            event.reason = "Driver cancelled the route";
+            notificationService.notifyDriverRideCancelled(driver.getId(), event);
+        });
+
+        // Remove the card from RouteMatchScreen for all waiting riders
+        notificationService.broadcastRouteUpdated(toResponse(route, null));
+    }
+
+    /**
+     * Driver marks route as completed.
+     * <ul>
+     *   <li>Sets completedAt / endTime on Route.</li>
+     *   <li>Calculates each CONFIRMED passenger's fare using their own A→B distance.</li>
+     *   <li>Adds in DROPPED passengers' fareShares for total driver earnings.</li>
+     *   <li>Sends per-passenger RIDE_COMPLETED WebSocket events.</li>
+     * </ul>
+     */
+    @Transactional
+    public RouteResponseDTO completeRoute(Long routeId, User driver) {
+        Route route = routeRepository.findById(routeId)
+                .orElseThrow(() -> new RuntimeException("Route not found"));
+        if (!route.getDriver().getId().equals(driver.getId()))
+            throw new RuntimeException("Unauthorized: not your route");
+
+        LocalDateTime now = LocalDateTime.now();
+        route.setStatus("COMPLETED");
+        route.setEndTime(now);
+        route.setCompletedAt(now);
+
+        Ride ride = rideRepository.findByRoute(route).orElse(null);
+        double totalEarnings = 0.0;
+
+        if (ride != null) {
+            ride.setEndTime(now);
+            ride.setStatus(RideStatus.COMPLETED);
+            rideRepository.save(ride);
+
+            List<RidePassenger> confirmed = ridePassengerRepository
+                    .findByRideAndStatus(ride, RidePassengerStatus.CONFIRMED);
+            List<RideCompletedEvent> events = new ArrayList<>();
+
+            for (RidePassenger rp : confirmed) {
+                rp.setStatus(RidePassengerStatus.COMPLETED);
+                double fare = 0.0, distKm = 0.0;
+
+                // Use passenger's own A→B segment, not the full route A→C
+                if (rp.getPickupLocation() != null && rp.getDestinationLocation() != null) {
+                    FareEstimateRequestDTO req = new FareEstimateRequestDTO();
+                    req.setPickupLat(rp.getPickupLocation().getY());
+                    req.setPickupLng(rp.getPickupLocation().getX());
+                    req.setDestLat(rp.getDestinationLocation().getY());
+                    req.setDestLng(rp.getDestinationLocation().getX());
+                    req.setPassengers(1);
+                    FareEstimateResponseDTO result = fareCalculationService.calculateSharedFare(req);
+                    fare = result.getPerPassengerFare();
+                    distKm = result.getDistanceKm();
+                }
+
+                rp.setFareShare(fare);
+                totalEarnings += fare;
+
+                RideCompletedEvent event = new RideCompletedEvent();
+                event.rideId = String.valueOf(ride.getId());
+                event.passengerPhone = rp.getPassenger().getPhoneNumber();
+                event.passengerEmail = rp.getPassenger().getEmail() != null
+                        ? rp.getPassenger().getEmail() : rp.getPassenger().getPhoneNumber();
+                event.fareAmount = fare;
+                event.distanceKm = distKm;
+                events.add(event);
+            }
+            ridePassengerRepository.saveAll(confirmed);
+
+            // Add mid-ride DROPPED passengers' earnings too
+            totalEarnings += ridePassengerRepository
+                    .findByRideAndStatus(ride, RidePassengerStatus.DROPPED).stream()
+                    .mapToDouble(rp -> rp.getFareShare() != null ? rp.getFareShare() : 0.0)
+                    .sum();
+
+            notificationService.broadcastRideCompleted(ride.getId(), events);
+        }
+
+        route.setTotalEarnings(totalEarnings);
+        routeRepository.save(route);
+
+        return toResponse(route, ride != null ? ride.getId() : null);
+    }
+
+    /** Add a stop/waypoint to a route. */
     @Transactional
     public RouteResponseDTO addStop(Long routeId, RouteAddStopRequest request, User driver) {
         Route route = routeRepository.findById(routeId)
                 .orElseThrow(() -> new RuntimeException("Route not found"));
-
-        if (!route.getDriver().getId().equals(driver.getId())) {
+        if (!route.getDriver().getId().equals(driver.getId()))
             throw new RuntimeException("Unauthorized: not your route");
-        }
 
         RouteStop stop = RouteStop.builder()
                 .route(route)
@@ -135,82 +246,12 @@ public class RouteService {
         return toResponse(route, rideId);
     }
 
-    /**
-     * Driver marks route as completed.
-     * Cascades: also completes the associated ride, marks passengers as COMPLETED,
-     * calculates fare, and populates fareShare.
-     */
-    @Transactional
-    public RouteResponseDTO completeRoute(Long routeId, User driver) {
-        Route route = routeRepository.findById(routeId)
-                .orElseThrow(() -> new RuntimeException("Route not found"));
-
-        if (!route.getDriver().getId().equals(driver.getId())) {
-            throw new RuntimeException("Unauthorized: not your route");
-        }
-
-        // 1. Mark route as completed
-        route.setStatus("COMPLETED");
-        routeRepository.save(route);
-
-        // 2. Cascade to the linked ride
-        rideRepository.findByRoute(route).ifPresent(ride -> {
-            ride.setEndTime(LocalDateTime.now());
-            ride.setStatus(RideStatus.COMPLETED);
-            rideRepository.save(ride);
-
-            // 3. Mark all confirmed passengers as completed
-            List<RidePassenger> confirmed = ridePassengerRepository
-                    .findByRideAndStatus(ride, RidePassengerStatus.CONFIRMED);
-            confirmed.forEach(rp -> rp.setStatus(RidePassengerStatus.COMPLETED));
-            ridePassengerRepository.saveAll(confirmed);
-
-            // 4. Calculate fare and populate Fare entity + fareShare
-            if (!confirmed.isEmpty()) {
-                double distanceKm = calculateDistance(
-                        route.getOriginLat(), route.getOriginLng(),
-                        route.getDestinationLat(), route.getDestinationLng());
-
-                double totalFare = BASE_FARE + (distanceKm * PRICE_PER_KM);
-                double discountedFare = totalFare * (1 - POOL_DISCOUNT);
-                double perPassengerFare = discountedFare / confirmed.size();
-
-                // Save Fare entity
-                Fare fare = Fare.builder()
-                        .ride(ride)
-                        .distanceKm(distanceKm)
-                        .totalFare(discountedFare)
-                        .perPassengerFare(perPassengerFare)
-                        .build();
-                fareRepository.save(fare);
-
-                // Populate fareShare on each passenger
-                confirmed.forEach(rp -> rp.setFareShare(perPassengerFare));
-                ridePassengerRepository.saveAll(confirmed);
-            }
-
-            notificationService.broadcastRideCompleted(ride.getId());
-        });
-
-        Long rideId = rideRepository.findByRoute(route).map(Ride::getId).orElse(null);
-        return toResponse(route, rideId);
-    }
-
-    /**
-     * Haversine distance calculation.
-     */
-    private double calculateDistance(double lat1, double lon1, double lat2, double lon2) {
-        double R = 6371;
-        double dLat = Math.toRadians(lat2 - lat1);
-        double dLon = Math.toRadians(lon2 - lon1);
-        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
-                + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
-                * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return R * c;
-    }
+    // -----------------------------------------------------------------------
+    // Private helpers
+    // -----------------------------------------------------------------------
 
     private RouteResponseDTO toResponse(Route route, Long rideId) {
+        double earnings = route.getTotalEarnings() != null ? route.getTotalEarnings() : 0.0;
         return RouteResponseDTO.builder()
                 .routeId(route.getId())
                 .rideId(rideId)
@@ -220,8 +261,12 @@ public class RouteService {
                 .originLng(route.getOriginLng())
                 .destinationLat(route.getDestinationLat())
                 .destinationLng(route.getDestinationLng())
+                .originAddress(route.getOriginAddress())
+                .destinationAddress(route.getDestinationAddress())
                 .totalSeats(route.getTotalSeats())
                 .availableSeats(route.getAvailableSeats())
+                .completedAt(route.getCompletedAt())
+                .earnings(earnings)
                 .build();
     }
 }

@@ -18,8 +18,13 @@ public class FareCalculationService {
         );
 
         double totalFare = BASE_FARE + (distanceKm * PRICE_PER_KM);
-        double discountedFare = totalFare * (1 - POOL_DISCOUNT);
-        double perPassengerFare = discountedFare / request.getPassengers();
+
+        // Pool discount only applies when 2 or more passengers share the ride
+        int passengers = Math.max(1, request.getPassengers());
+        double discountedFare = (passengers > 1)
+                ? totalFare * (1 - POOL_DISCOUNT)
+                : totalFare;
+        double perPassengerFare = discountedFare / passengers;
 
         return new FareEstimateResponseDTO(distanceKm, discountedFare, perPassengerFare);
     }

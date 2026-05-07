@@ -65,4 +65,8 @@ public class RidePassenger {
      * Populated when the ride is completed and fare is split.
      */
     private Double fareShare;
+
+    /** True once the driver confirms cash payment was received for this passenger. */
+    @Builder.Default
+    private boolean cashConfirmed = false;
 }
