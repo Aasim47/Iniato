@@ -13,9 +13,18 @@ public class DriverProfileResponse {
     private String phoneNumber;
     private String vehicleRegistration;
     private String licenseNumber;
-    /** AUTO_RICKSHAW, BIKE, CAR, MINI_TRUCK */
+    /** BIKE, AUTO or CAB — see {@link com.backend.iniato.enums.VehicleType}. */
     private String vehicleType;
+    /** Passenger capacity implied by {@link #vehicleType}. Read-only. */
+    private Integer seatCapacity;
     private DriverStatus status;
     private Double averageRating;
     private Integer ratingCount;
+
+    /** Platform fees the driver has collected in cash and still owes Iniato. */
+    private java.math.BigDecimal duesBalance;
+    /** Balance at which the driver is blocked from taking new work. */
+    private java.math.BigDecimal duesThreshold;
+    /** {@code duesBalance >= duesThreshold} — cannot go online or accept rides. */
+    private Boolean duesBlocked;
 }

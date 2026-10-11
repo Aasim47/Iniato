@@ -13,6 +13,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -31,6 +33,9 @@ public class RideService {
     private final DriverProfileRepository driverProfileRepository;
     private final NotificationService notificationService;
     private final FareCalculationService fareCalculationService;
+    private final RideSettlementService rideSettlementService;
+    private final DriverDuesService driverDuesService;
+    private final UserLookupService userLookupService;
     private static final int SRID = 4326;
     private final GeometryFactory geometryFactory = new GeometryFactory(new PrecisionModel(), SRID);
 
@@ -49,7 +54,13 @@ public class RideService {
                        PassengerProfileRepository passengerProfileRepository,
                        DriverProfileRepository driverProfileRepository,
                        NotificationService notificationService,
-                       FareCalculationService fareCalculationService) {
+                       FareCalculationService fareCalculationService,
+                       RideSettlementService rideSettlementService,
+                       DriverDuesService driverDuesService,
+                       UserLookupService userLookupService) {
+        this.rideSettlementService = rideSettlementService;
+        this.driverDuesService = driverDuesService;
+        this.userLookupService = userLookupService;
         this.rideRepository = rideRepository;
         this.userRepository = userRepository;
         this.rideRequestRepository = rideRequestRepository;
@@ -61,11 +72,15 @@ public class RideService {
         this.fareCalculationService = fareCalculationService;
     }
 
+    /**
+     * The authenticated user.
+     *
+     * <p>Was a local two-query lookup (phone, then email) repeated on every
+     * call. Now the shared cached lookup, which on most requests returns the
+     * principal the JWT filter already built — zero queries.
+     */
     private User getCurrentUser() {
-        String username = SecurityContextHolder.getContext().getAuthentication().getName();
-        return userRepository.findByPhoneNumber(username)
-                .or(() -> userRepository.findByEmail(username))
-                .orElseThrow(() -> new RuntimeException("User not found"));
+        return userLookupService.currentUser();
     }
 
     /**
@@ -73,7 +88,7 @@ public class RideService {
      * Creates a RideRequest + a PENDING RidePassenger, then notifies the driver.
      *
      * <p>Before accepting the request the service validates that the passenger's
-     * pickup→destination vector is directionally compatible with the ride's route
+     * pickupâ†’destination vector is directionally compatible with the ride's route
      * (same general direction, pickup within the route corridor). Requests that
      * would require the driver to backtrack or deviate significantly are rejected.
      */
@@ -84,16 +99,26 @@ public class RideService {
         Ride ride = rideRepository.findById(requestDTO.getRideId())
                 .orElseThrow(() -> new RuntimeException("Ride not found"));
 
-        if (ride.getStatus() != RideStatus.POOL_FORMING) {
-            throw new RuntimeException("Ride is not accepting passengers");
+        // Pooling: allow joining a forming pool AND an in-progress ride, so riders
+        // ahead on the corridor can hop into a moving auto that still has seats.
+        if (ride.getStatus() != RideStatus.POOL_FORMING
+                && ride.getStatus() != RideStatus.STARTED) {
+            throw new IllegalStateException("Ride is not accepting passengers");
         }
 
         if (ride.getRoute() != null && ride.getRoute().getAvailableSeats() <= 0) {
-            throw new RuntimeException("No seats available");
+            throw new IllegalStateException("No seats available");
         }
 
-        if (ridePassengerRepository.existsByRideAndPassenger(ride, passenger)) {
-            throw new RuntimeException("You have already requested or joined this ride");
+        // Block only if the rider currently has an ACTIVE seat on this ride.
+        // A rider who previously LEFT (or was REJECTED) is allowed to rejoin —
+        // their existing row is reactivated below (the (ride, passenger) unique
+        // constraint means we must reuse it rather than insert a new one).
+        var existingPassenger = ridePassengerRepository.findByRideAndPassenger(ride, passenger);
+        if (existingPassenger.isPresent()
+                && existingPassenger.get().getStatus() != RidePassengerStatus.LEFT
+                && existingPassenger.get().getStatus() != RidePassengerStatus.REJECTED) {
+            throw new IllegalStateException("You have already requested or joined this ride");
         }
 
         // Prevent passenger from having multiple active rides simultaneously
@@ -106,11 +131,11 @@ public class RideService {
                     (rp.getRide().getStatus() == RideStatus.POOL_FORMING ||
                      rp.getRide().getStatus() == RideStatus.STARTED));
         if (alreadyInActiveRide) {
-            throw new RuntimeException(
+            throw new IllegalStateException(
                     "You already have an active ride. Please complete or cancel it before joining another.");
         }
 
-        // ── Direction compatibility gate ─────────────────────────────────────
+        // â”€â”€ Direction compatibility gate â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         // Ensure the passenger is travelling in the same general direction as the
         // driver's route. If not, reject immediately so the passenger is not shown
         // (or able to join) a ride heading the opposite way.
@@ -120,18 +145,18 @@ public class RideService {
                 if (!isDirectionCompatible(route,
                         requestDTO.getPickupLat(), requestDTO.getPickupLng(),
                         requestDTO.getDestLat(),   requestDTO.getDestLng())) {
-                    throw new RuntimeException(
+                    throw new IllegalArgumentException(
                             "Your destination is not in the same direction as this ride. " +
                             "Please search for a ride that matches your route.");
                 }
                 if (!isPickupWithinCorridor(route,
                         requestDTO.getPickupLat(), requestDTO.getPickupLng())) {
-                    throw new RuntimeException(
+                    throw new IllegalArgumentException(
                             "Your pickup location is too far from this ride's route corridor.");
                 }
             }
         }
-        // ────────────────────────────────────────────────────────────────────
+        // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
         Point pickup = geometryFactory.createPoint(
                 new Coordinate(requestDTO.getPickupLng(), requestDTO.getPickupLat()));
@@ -154,15 +179,27 @@ public class RideService {
                 .build();
         rideRequestRepository.save(rideRequest);
 
-        // Pending row — promoted to CONFIRMED when driver accepts
-        RidePassenger ridePassenger = RidePassenger.builder()
-                .ride(ride)
-                .passenger(passenger)
-                .pickupLocation(pickup)
-                .destinationLocation(destination)
-                .status(RidePassengerStatus.PENDING)
-                .rideRequest(rideRequest)
-                .build();
+        // Pending row â€” promoted to CONFIRMED when driver accepts.
+        // Reactivate the rider's prior row if they had left, otherwise create one.
+        RidePassenger ridePassenger;
+        if (existingPassenger.isPresent()) {
+            ridePassenger = existingPassenger.get();
+            ridePassenger.setPickupLocation(pickup);
+            ridePassenger.setDestinationLocation(destination);
+            ridePassenger.setStatus(RidePassengerStatus.PENDING);
+            ridePassenger.setRideRequest(rideRequest);
+            ridePassenger.setFareShare(null);
+            ridePassenger.setJoinedAt(null);
+        } else {
+            ridePassenger = RidePassenger.builder()
+                    .ride(ride)
+                    .passenger(passenger)
+                    .pickupLocation(pickup)
+                    .destinationLocation(destination)
+                    .status(RidePassengerStatus.PENDING)
+                    .rideRequest(rideRequest)
+                    .build();
+        }
         ridePassengerRepository.save(ridePassenger);
 
         if (ride.getDriver() != null) {
@@ -186,7 +223,7 @@ public class RideService {
 
     /**
      * Returns true when the passenger's travel vector is within
-     * {@value MAX_DIRECTION_ANGLE_DEG}° of the route's direction vector.
+     * {@value MAX_DIRECTION_ANGLE_DEG}Â° of the route's direction vector.
      */
     private boolean isDirectionCompatible(Route route,
                                           double pPickupLat, double pPickupLng,
@@ -273,7 +310,7 @@ public class RideService {
                 .orElseThrow(() -> new RuntimeException("Ride not found"));
 
         if (ride.getStatus() != RideStatus.POOL_FORMING) {
-            throw new RuntimeException("Cannot leave ride after it has started");
+            throw new IllegalStateException("Cannot leave ride after it has started");
         }
 
         RidePassenger ridePassenger = ridePassengerRepository
@@ -283,32 +320,10 @@ public class RideService {
         // Allow both PENDING (not yet accepted) and CONFIRMED passengers to leave
         if (ridePassenger.getStatus() != RidePassengerStatus.CONFIRMED
                 && ridePassenger.getStatus() != RidePassengerStatus.PENDING) {
-            throw new RuntimeException("You are not an active passenger on this ride");
+            throw new IllegalStateException("You are not an active passenger on this ride");
         }
 
-        ridePassenger.setStatus(RidePassengerStatus.LEFT);
-        ridePassengerRepository.save(ridePassenger);
-
-        if (ride.getRoute() != null) {
-            ride.getRoute().setAvailableSeats(ride.getRoute().getAvailableSeats() + 1);
-            routeRepository.save(ride.getRoute());
-        }
-
-        boolean noConfirmedLeft = ridePassengerRepository
-                .findByRideAndStatus(ride, RidePassengerStatus.CONFIRMED)
-                .isEmpty();
-        if (noConfirmedLeft) {
-            ride.setStatus(RideStatus.CANCELLED);
-            rideRepository.save(ride);
-            // Notify driver that the ride was auto-cancelled
-            if (ride.getDriver() != null) {
-                RideCancelledEvent event = new RideCancelledEvent();
-                event.rideId = String.valueOf(rideId);
-                event.reason = "All passengers left";
-                notificationService.notifyDriverRideCancelled(ride.getDriver().getId(), event);
-            }
-        }
-
+        removePassengerFromPool(ride, ridePassenger);
         return toResponse(ride);
     }
 
@@ -327,14 +342,45 @@ public class RideService {
      * Returns pending RideRequests for a specific ride (driver view).
      */
     @Transactional(readOnly = true)
-    public List<RideRequest> getPendingRequests(Long rideId) {
+    public List<PendingRequestDTO> getPendingRequests(Long rideId) {
         Ride ride = rideRepository.findById(rideId)
                 .orElseThrow(() -> new RuntimeException("Ride not found"));
-        return rideRequestRepository.findByMatchedRideAndStatus(ride, "REQUESTED");
+        return rideRequestRepository.findByMatchedRideAndStatus(ride, "REQUESTED")
+                .stream()
+                .map(req -> {
+                    User rider = req.getPassenger();
+                    String riderName = passengerProfileRepository.findByUser(rider)
+                            .map(PassengerProfile::getFullName)
+                            .orElse(rider.getPhoneNumber());
+                    Double pickupLat = null, pickupLng = null, dropLat = null, dropLng = null;
+                    if (req.getPickupLocation() != null) {
+                        pickupLat = req.getPickupLocation().getY();
+                        pickupLng = req.getPickupLocation().getX();
+                    }
+                    if (req.getDestinationLocation() != null) {
+                        dropLat = req.getDestinationLocation().getY();
+                        dropLng = req.getDestinationLocation().getX();
+                    }
+                    return PendingRequestDTO.builder()
+                            .requestId(req.getId())
+                            .rideId(rideId)
+                            .riderId(rider.getId())
+                            .riderName(riderName)
+                            .riderPhone(rider.getPhoneNumber())
+                            .pickupLat(pickupLat)
+                            .pickupLng(pickupLng)
+                            .dropLat(dropLat)
+                            .dropLng(dropLng)
+                            .pickupName(req.getPickupLocationName())
+                            .destName(req.getDestinationName())
+                            .status(req.getStatus())
+                            .build();
+                })
+                .collect(Collectors.toList());
     }
 
     /**
-     * Driver accepts a passenger's RideRequest — promotes their RidePassenger to CONFIRMED.
+     * Driver accepts a passenger's RideRequest â€” promotes their RidePassenger to CONFIRMED.
      */
     @Transactional
     public RideResponseDTO acceptPassengerRequest(Long rideId, Long requestId) {
@@ -343,18 +389,18 @@ public class RideService {
                 .orElseThrow(() -> new RuntimeException("Ride not found"));
 
         if (ride.getDriver() == null || !ride.getDriver().getId().equals(driver.getId())) {
-            throw new RuntimeException("You are not the driver of this ride");
+            throw new SecurityException("You are not the driver of this ride");
         }
 
         RideRequest request = rideRequestRepository.findById(requestId)
                 .orElseThrow(() -> new RuntimeException("Request not found"));
 
         if (!request.getMatchedRide().getId().equals(rideId)) {
-            throw new RuntimeException("Request does not belong to this ride");
+            throw new IllegalArgumentException("Request does not belong to this ride");
         }
 
         if (!"REQUESTED".equals(request.getStatus())) {
-            throw new RuntimeException("Request is no longer pending");
+            throw new IllegalStateException("Request is no longer pending");
         }
 
         // Lock the Route row to prevent concurrent overbooking.
@@ -363,7 +409,7 @@ public class RideService {
             Route lockedRoute = routeRepository.findByIdForUpdate(ride.getRoute().getId())
                     .orElseThrow(() -> new RuntimeException("Route not found"));
             if (lockedRoute.getAvailableSeats() <= 0) {
-                throw new RuntimeException("No seats available — ride is full");
+                throw new IllegalStateException("No seats available – ride is full");
             }
             lockedRoute.setAvailableSeats(lockedRoute.getAvailableSeats() - 1);
             routeRepository.save(lockedRoute);
@@ -402,11 +448,21 @@ public class RideService {
                     .destinationLng(updatedRoute.getDestinationLng())
                     .originAddress(updatedRoute.getOriginAddress())
                     .destinationAddress(updatedRoute.getDestinationAddress())
+                    .vehicleType(updatedRoute.getVehicleType() != null
+                            ? updatedRoute.getVehicleType().name() : null)
                     .totalSeats(updatedRoute.getTotalSeats())
                     .availableSeats(updatedRoute.getAvailableSeats())
                     .earnings(0.0)
                     .build();
             notificationService.broadcastRouteUpdated(routeUpdate);
+        }
+
+        // If the rider joined an already in-progress ride, push RIDE_STARTED so
+        // their app transitions straight into the in-progress view (they missed
+        // the original broadcast sent at start time). Existing riders re-receiving
+        // it is a harmless no-op.
+        if (ride.getStatus() == RideStatus.STARTED) {
+            notificationService.broadcastRideStarted(rideId);
         }
 
         return toResponse(ride);
@@ -422,11 +478,14 @@ public class RideService {
                 .orElseThrow(() -> new RuntimeException("Ride not found"));
 
         if (ride.getDriver() == null || !ride.getDriver().getId().equals(driver.getId())) {
-            throw new RuntimeException("You are not authorized to start this ride");
+            throw new SecurityException("You are not authorized to start this ride");
         }
 
+        // Starting a ride is taking on new work — blocked while dues are unpaid.
+        driverDuesService.assertCanDrive(driver);
+
         if (ridePassengerRepository.findByRideAndStatus(ride, RidePassengerStatus.CONFIRMED).isEmpty()) {
-            throw new RuntimeException("No confirmed passengers on board yet");
+            throw new IllegalStateException("No confirmed passengers on board yet");
         }
 
         ride.setStartTime(LocalDateTime.now());
@@ -448,7 +507,14 @@ public class RideService {
                 .orElseThrow(() -> new RuntimeException("Ride not found"));
 
         if (ride.getDriver() == null || !ride.getDriver().getId().equals(driver.getId())) {
-            throw new RuntimeException("Unauthorized driver");
+            throw new SecurityException("Unauthorized driver");
+        }
+
+        // A repeated POST must not re-run the fare loop or re-bill the driver.
+        // The settlement's unique key would catch the second charge anyway, but
+        // returning early keeps the passenger rows and broadcasts clean too.
+        if (ride.getStatus() == RideStatus.COMPLETED) {
+            return toResponse(ride);
         }
 
         ride.setEndTime(LocalDateTime.now());
@@ -469,6 +535,7 @@ public class RideService {
                 fareReq.setDestLat(rp.getDestinationLocation().getY());
                 fareReq.setDestLng(rp.getDestinationLocation().getX());
                 fareReq.setPassengers(1);
+                fareReq.setVehicleType(routeVehicleType(ride));
                 FareEstimateResponseDTO result = fareCalculationService.calculateSharedFare(fareReq);
                 fare = result.getPerPassengerFare();
                 distKm = result.getDistanceKm();
@@ -485,19 +552,29 @@ public class RideService {
         }
         ridePassengerRepository.saveAll(confirmed);
 
-        // ── Update route total earnings ──────────────────────────────────────
-        // Sum this batch + any already-banked fares from mid-ride DROPPED passengers
+        // â”€â”€ Settle the platform's cut â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // Everyone who travelled pays: those still aboard plus anyone dropped
+        // mid-route. Settlement re-splits the same total by distance and bills
+        // the driver once; it is a no-op if this ride was already settled
+        // through RouteService.completeRoute.
+        List<RidePassenger> dropped = ridePassengerRepository
+                .findByRideAndStatus(ride, RidePassengerStatus.DROPPED);
+        List<RidePassenger> travelled = new ArrayList<>(confirmed);
+        travelled.addAll(dropped);
+
+        rideSettlementService.settlePooledRide(ride, travelled);
+
+        // Re-read the settled shares so riders are told what they actually owe,
+        // not the pre-split estimate computed above.
+        applySettledFares(events, travelled);
+
+        // â”€â”€ Update route total earnings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if (ride.getRoute() != null) {
-            double droppedTotal = ridePassengerRepository
-                    .findByRideAndStatus(ride, RidePassengerStatus.DROPPED)
-                    .stream()
+            double total = travelled.stream()
                     .mapToDouble(rp -> rp.getFareShare() != null ? rp.getFareShare() : 0.0)
                     .sum();
-            double confirmedTotal = events.stream()
-                    .mapToDouble(e -> e.fareAmount)
-                    .sum();
             Route route = ride.getRoute();
-            route.setTotalEarnings(confirmedTotal + droppedTotal);
+            route.setTotalEarnings(total);
             route.setStatus("COMPLETED");
             route.setEndTime(LocalDateTime.now());
             route.setCompletedAt(LocalDateTime.now());
@@ -506,6 +583,31 @@ public class RideService {
 
         notificationService.broadcastRideCompleted(rideId, events);
         return toResponse(ride);
+    }
+
+    /**
+     * Overwrite the fares on outgoing completion events with the settled
+     * amounts, and attach the convenience fee so riders see the breakdown.
+     * <p>
+     * The pre-settlement loop prices each rider as a solo trip; settlement
+     * re-splits the ride total by distance. Without this the rider would be
+     * shown a number that differs from what they were charged.
+     */
+    private void applySettledFares(List<RideCompletedEvent> events,
+                                   List<RidePassenger> travelled) {
+        for (RideCompletedEvent event : events) {
+            travelled.stream()
+                    .filter(rp -> rp.getPassenger() != null
+                            && rp.getPassenger().getPhoneNumber() != null
+                            && rp.getPassenger().getPhoneNumber().equals(event.passengerPhone))
+                    .findFirst()
+                    .ifPresent(rp -> {
+                        if (rp.getFareShare() != null) event.fareAmount = rp.getFareShare();
+                        if (rp.getConvenienceFee() != null) {
+                            event.convenienceFee = rp.getConvenienceFee().doubleValue();
+                        }
+                    });
+        }
     }
 
     /**
@@ -519,7 +621,7 @@ public class RideService {
                 .orElseThrow(() -> new RuntimeException("Ride not found"));
 
         if (ride.getDriver() == null || !ride.getDriver().getId().equals(driver.getId())) {
-            throw new RuntimeException("You are not the driver of this ride");
+            throw new SecurityException("You are not the driver of this ride");
         }
 
         RidePassenger ridePassenger = ridePassengerRepository.findByRide(ride).stream()
@@ -527,7 +629,7 @@ public class RideService {
                 .orElseThrow(() -> new RuntimeException("Passenger not found on this ride"));
 
         if (ridePassenger.getStatus() != RidePassengerStatus.CONFIRMED) {
-            throw new RuntimeException("Passenger is not currently on board");
+            throw new IllegalStateException("Passenger is not currently on board");
         }
 
         double fare = 0.0, distanceKm = 0.0;
@@ -538,6 +640,7 @@ public class RideService {
             fareReq.setDestLat(ridePassenger.getDestinationLocation().getY());
             fareReq.setDestLng(ridePassenger.getDestinationLocation().getX());
             fareReq.setPassengers(1);
+            fareReq.setVehicleType(routeVehicleType(ride));
             FareEstimateResponseDTO fareResult = fareCalculationService.calculateSharedFare(fareReq);
             fare = fareResult.getPerPassengerFare();
             distanceKm = fareResult.getDistanceKm();
@@ -547,9 +650,7 @@ public class RideService {
         ridePassengerRepository.save(ridePassenger);
 
         if (ride.getRoute() != null) {
-            Route route = ride.getRoute();
-            route.setAvailableSeats(route.getAvailableSeats() + 1);
-            routeRepository.save(route);
+            releaseSeat(ride.getRoute().getId());
         }
 
         DropPassengerEvent event = new DropPassengerEvent();
@@ -560,17 +661,39 @@ public class RideService {
         event.fareAmount = fare;
         event.distanceKm = distanceKm;
         notificationService.notifyPassengerDropped(rideId, event);
+     }
+
+    /**
+     * Return one seat to a route after a passenger is dropped off or leaves.
+     * <p>
+     * Takes the same pessimistic write lock the accept path uses so a
+     * concurrent accept and release cannot lose an update, and clamps to
+     * {@code totalSeats} so a repeated call can never inflate a 3-seat auto
+     * into selling a 4th seat.
+     */
+    private void releaseSeat(Long routeId) {
+        Route route = routeRepository.findByIdForUpdate(routeId)
+                .orElseThrow(() -> new RuntimeException("Route not found"));
+        int capacity = route.getTotalSeats() != null ? route.getTotalSeats() : 0;
+        int available = route.getAvailableSeats() != null ? route.getAvailableSeats() : 0;
+        route.setAvailableSeats(Math.min(capacity, available + 1));
+        routeRepository.save(route);
     }
 
-    /** Rider requests drop-off — notifies driver via WebSocket. */
-    @Transactional(readOnly = true)
-    /** Driver confirms cash payment received from a specific passenger. */
-    public void confirmCashPayment(Long rideId, Long passengerId) {
-        User driver = getCurrentUser();
+    /** Vehicle type backing a ride's route, as a wire string. Null when unknown. */
+    private String routeVehicleType(Ride ride) {
+        if (ride.getRoute() == null || ride.getRoute().getVehicleType() == null) return null;
+        return ride.getRoute().getVehicleType().name();
+    }
+
+     /** Driver confirms cash payment received from a specific passenger. */
+     @Transactional
+     public void confirmCashPayment(Long rideId, Long passengerId) {
+         User driver = getCurrentUser();
         Ride ride = rideRepository.findById(rideId)
                 .orElseThrow(() -> new RuntimeException("Ride not found"));
         if (ride.getDriver() == null || !ride.getDriver().getId().equals(driver.getId())) {
-            throw new RuntimeException("You are not the driver of this ride");
+            throw new SecurityException("You are not the driver of this ride");
         }
         RidePassenger rp = ridePassengerRepository.findByRide(ride).stream()
                 .filter(p -> p.getPassenger().getId().equals(passengerId))
@@ -580,13 +703,16 @@ public class RideService {
         ridePassengerRepository.save(rp);
     }
 
+    // Transactional because ride.getDriver() is a lazy @ManyToOne. It resolved
+    // through the open-in-view session before; that is now off.
+    @Transactional
     public void requestDropOff(Long rideId) {
         User passenger = getCurrentUser();
         Ride ride = rideRepository.findById(rideId)
                 .orElseThrow(() -> new RuntimeException("Ride not found"));
 
         if (ride.getStatus() != RideStatus.STARTED) {
-            throw new RuntimeException("Ride is not in progress");
+            throw new IllegalStateException("Ride is not in progress");
         }
 
         ridePassengerRepository.findByRideAndPassenger(ride, passenger)
@@ -605,19 +731,18 @@ public class RideService {
         }
     }
 
-    /** Rider rates the driver after a ride. */
-    @Transactional
-    public void rateDriver(Long rideId, int rating) {
-        User passenger = getCurrentUser();
-        Ride ride = rideRepository.findById(rideId)
+     /** Rider rates the driver after a ride. */
+     @Transactional
+     public void rateDriver(Long rideId, int rating) {
+         Ride ride = rideRepository.findById(rideId)
                 .orElseThrow(() -> new RuntimeException("Ride not found"));
 
         if (ride.getStatus() != RideStatus.COMPLETED) {
-            throw new RuntimeException("Can only rate a completed ride");
+            throw new IllegalStateException("Can only rate a completed ride");
         }
 
         if (ride.getDriver() == null) {
-            throw new RuntimeException("No driver on this ride");
+            throw new IllegalStateException("No driver on this ride");
         }
 
         DriverProfile profile = driverProfileRepository.findByUser(ride.getDriver())
@@ -635,7 +760,7 @@ public class RideService {
 
     /**
      * Returns all passengers on a ride (for driver view).
-     * Includes PENDING, CONFIRMED, and DROPPED — excludes LEFT/REJECTED.
+     * Includes PENDING, CONFIRMED, and DROPPED â€” excludes LEFT/REJECTED.
      */
     @Transactional(readOnly = true)
     public List<PassengerInfoDTO> getRidePassengers(Long rideId) {
@@ -651,13 +776,24 @@ public class RideService {
                             .findByUser(rp.getPassenger())
                             .map(PassengerProfile::getFullName)
                             .orElse(rp.getPassenger().getPhoneNumber());
+                    Double pickupLat = null, pickupLng = null, dropLat = null, dropLng = null;
+                    if (rp.getPickupLocation() != null) {
+                        pickupLat = rp.getPickupLocation().getY();
+                        pickupLng = rp.getPickupLocation().getX();
+                    }
+                    if (rp.getDestinationLocation() != null) {
+                        dropLat = rp.getDestinationLocation().getY();
+                        dropLng = rp.getDestinationLocation().getX();
+                    }
                     return new PassengerInfoDTO(
                             rp.getPassenger().getId(),
                             name,
                             rp.getPassenger().getPhoneNumber(),
                             rp.getPassenger().getEmail(),
                             rp.getStatus().name(),
-                            rp.getFareShare()
+                            rp.getFareShare(),
+                            pickupLat, pickupLng,
+                            dropLat, dropLng
                     );
                 })
                 .collect(Collectors.toList());
@@ -686,14 +822,15 @@ public class RideService {
         String passengerPickup = null;
         String passengerDest = null;
         try {
-            String username = org.springframework.security.core.context.SecurityContextHolder
-                    .getContext().getAuthentication().getName();
-            java.util.Optional<com.backend.iniato.entity.User> userOpt =
-                    userRepository.findByPhoneNumber(username)
-                            .or(() -> userRepository.findByEmail(username));
-            if (userOpt.isPresent()) {
+            // This ran a two-query user lookup PER RIDE. toResponse is called
+            // from list endpoints (getPassengerSharedRides, getAvailableSharedRides),
+            // so a rider with ten rides paid twenty queries just to re-identify
+            // themselves ten times. The shared lookup reuses the principal the
+            // JWT filter already resolved: no query at all.
+            User currentUser = userLookupService.currentUserOrNull();
+            if (currentUser != null) {
                 java.util.Optional<RidePassenger> rpOpt =
-                        ridePassengerRepository.findByRideAndPassenger(ride, userOpt.get());
+                        ridePassengerRepository.findByRideAndPassenger(ride, currentUser);
                 if (rpOpt.isPresent()) {
                     RidePassenger rp = rpOpt.get();
                     passengerStatus = rp.getStatus().name();
@@ -736,7 +873,7 @@ public class RideService {
 
         // Allow cancel for POOL_FORMING (leave) or stale STARTED rides
         if (ride.getStatus() == RideStatus.COMPLETED || ride.getStatus() == RideStatus.CANCELLED) {
-            throw new RuntimeException("Ride is already " + ride.getStatus().name().toLowerCase());
+            throw new IllegalStateException("Ride is already " + ride.getStatus().name().toLowerCase());
         }
 
         RidePassenger ridePassenger = ridePassengerRepository
@@ -745,33 +882,115 @@ public class RideService {
 
         if (ridePassenger.getStatus() == RidePassengerStatus.LEFT
                 || ridePassenger.getStatus() == RidePassengerStatus.REJECTED) {
-            throw new RuntimeException("You have already left this ride");
+            throw new IllegalStateException("You have already left this ride");
         }
 
+        removePassengerFromPool(ride, ridePassenger);
+        return toResponse(ride);
+    }
+
+    /**
+     * Removes a single passenger from a still-forming pool: marks them LEFT,
+     * cancels their originating RideRequest (so it stops appearing in the
+     * driver's pending-requests list), and frees their seat back to the route.
+     *
+     * <p>The shared {@link Ride}/{@link Route} is the driver's and is left in
+     * {@code POOL_FORMING} regardless of how many passengers remain — one rider
+     * leaving must never cancel the route. Only the driver cancels a route
+     * (via {@code RouteService.cancelRoute}). The driver's UI is refreshed with
+     * a PASSENGER_DROPPED broadcast so the freed seat shows immediately.
+     */
+    private void removePassengerFromPool(Ride ride, RidePassenger ridePassenger) {
+        User rider = ridePassenger.getPassenger();
         ridePassenger.setStatus(RidePassengerStatus.LEFT);
         ridePassengerRepository.save(ridePassenger);
 
-        // Restore seat
+        // Cancel the originating join-request so it stops showing in the driver's
+        // pending list and can no longer be accepted.
+        RideRequest request = ridePassenger.getRideRequest();
+        if (request != null) {
+            request.setStatus("CANCELLED");
+            rideRequestRepository.save(request);
+        }
+
         if (ride.getRoute() != null) {
-            ride.getRoute().setAvailableSeats(ride.getRoute().getAvailableSeats() + 1);
-            routeRepository.save(ride.getRoute());
+            releaseSeat(ride.getRoute().getId());
         }
 
-        // Auto-cancel ride if no confirmed passengers remain
-        boolean noConfirmedLeft = ridePassengerRepository
-                .findByRideAndStatus(ride, RidePassengerStatus.CONFIRMED).isEmpty();
-        if (noConfirmedLeft && ride.getStatus() != RideStatus.STARTED) {
-            ride.setStatus(RideStatus.CANCELLED);
-            rideRepository.save(ride);
-            if (ride.getDriver() != null) {
-                RideCancelledEvent event = new RideCancelledEvent();
-                event.rideId = String.valueOf(rideId);
-                event.reason = "Passenger cancelled";
-                notificationService.notifyDriverRideCancelled(ride.getDriver().getId(), event);
+        // Defer all broadcasts until the transaction COMMITS. Otherwise the driver
+        // reacts to PASSENGER_LEFT and re-fetches the passenger list before this
+        // LEFT status is committed, reading the stale PENDING/CONFIRMED row — which
+        // is exactly why a cancelled rider lingered as "Pending" on the driver.
+        final Long rideId = ride.getId();
+        final Long driverId = ride.getDriver() != null ? ride.getDriver().getId() : null;
+        final String requestId = request != null ? String.valueOf(request.getId()) : null;
+        final String riderId = String.valueOf(rider.getId());
+        final String riderPhone = rider.getPhoneNumber();
+        final RouteResponseDTO routeUpdate = ride.getRoute() != null
+                ? buildRouteUpdate(ride.getRoute(), rideId) : null;
+
+        runAfterCommit(() -> {
+            // Remove the rider's incoming-request banner so the driver can no
+            // longer accept someone who already left.
+            if (driverId != null) {
+                NewRiderRequestEvent cancelEvent = new NewRiderRequestEvent();
+                cancelEvent.type = "REQUEST_CANCELLED";
+                cancelEvent.rideId = String.valueOf(rideId);
+                cancelEvent.requestId = requestId;
+                cancelEvent.riderId = riderId;
+                cancelEvent.passengerPhone = riderPhone;
+                notificationService.notifyDriverNewRequest(driverId, cancelEvent);
             }
-        }
 
-        return toResponse(ride);
+            // Refresh the driver's passenger list (freed seat) without tearing down
+            // the ride. This is a LEAVE, not a drop-off — riders must not see
+            // fare/rating, so PASSENGER_LEFT (which rider clients ignore) is used.
+            PassengerLeftEvent leftEvent = new PassengerLeftEvent();
+            leftEvent.rideId = String.valueOf(rideId);
+            leftEvent.passengerPhone = riderPhone;
+            notificationService.notifyPassengerLeft(rideId, leftEvent);
+
+            // Broadcast the freed seat so other riders' match screens stay accurate.
+            if (routeUpdate != null) {
+                notificationService.broadcastRouteUpdated(routeUpdate);
+            }
+        });
+    }
+
+    /** Builds a seat-count snapshot DTO for ROUTE_UPDATED broadcasts. */
+    private RouteResponseDTO buildRouteUpdate(Route route, Long rideId) {
+        return RouteResponseDTO.builder()
+                .routeId(route.getId())
+                .rideId(rideId)
+                .driverPhone(route.getDriver() != null ? route.getDriver().getPhoneNumber() : null)
+                .status(route.getStatus())
+                .originLat(route.getOriginLat())
+                .originLng(route.getOriginLng())
+                .destinationLat(route.getDestinationLat())
+                .destinationLng(route.getDestinationLng())
+                .originAddress(route.getOriginAddress())
+                .destinationAddress(route.getDestinationAddress())
+                .vehicleType(route.getVehicleType() != null ? route.getVehicleType().name() : null)
+                .totalSeats(route.getTotalSeats())
+                .availableSeats(route.getAvailableSeats())
+                .earnings(0.0)
+                .build();
+    }
+
+    /** Runs {@code action} after the current transaction commits (or immediately
+     *  if no transaction is active), so WebSocket consumers read committed state. */
+    private void runAfterCommit(Runnable action) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    action.run();
+                }
+            });
+        } else {
+            action.run();
+        }
     }
 }
+
 

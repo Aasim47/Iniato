@@ -17,6 +17,8 @@ public class RouteResponseDTO {
     private Double destinationLng;
     private String originAddress;       // human-readable start name
     private String destinationAddress;  // human-readable end name
+    /** BIKE, AUTO or CAB — see {@link com.backend.iniato.enums.VehicleType}. */
+    private String vehicleType;
     private Integer totalSeats;
     private Integer availableSeats;
     private LocalDateTime completedAt;

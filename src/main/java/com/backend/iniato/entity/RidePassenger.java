@@ -16,7 +16,16 @@ import java.time.LocalDateTime;
 @Entity
 @Table(
     name = "ride_passengers",
-    uniqueConstraints = @UniqueConstraint(columnNames = {"ride_id", "user_id"})
+    uniqueConstraints = @UniqueConstraint(columnNames = {"ride_id", "user_id"}),
+    // Without these, findByRide / findByRideAndStatus / findByPassenger all
+    // sequentially scan. Neon bills compute, so a scan is money as well as
+    // latency. The unique constraint already indexes (ride_id, user_id) and so
+    // serves ride_id lookups as a prefix — these cover the other two access
+    // paths: status filtering within a ride, and a passenger's own history.
+    indexes = {
+        @Index(name = "ix_ride_passengers_ride_status", columnList = "ride_id, status"),
+        @Index(name = "ix_ride_passengers_user", columnList = "user_id")
+    }
 )
 @Getter
 @Setter
@@ -61,10 +70,21 @@ public class RidePassenger {
     private RideRequest rideRequest;
 
     /**
-     * This passenger's share of the total fare.
+     * This passenger's share of the total fare — the amount they actually pay.
      * Populated when the ride is completed and fare is split.
      */
     private Double fareShare;
+
+    /**
+     * Iniato's convenience fee, carved out of {@link #fareShare} at settlement.
+     * <p>
+     * The rider still pays {@code fareShare}; this records how much of it was
+     * ours, so a receipt can be reproduced later without re-running the fee
+     * engine against rates that may since have changed. Null for rides that
+     * predate the fee.
+     */
+    @Column(precision = 10, scale = 2)
+    private java.math.BigDecimal convenienceFee;
 
     /** True once the driver confirms cash payment was received for this passenger. */
     @Builder.Default

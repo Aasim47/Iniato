@@ -7,60 +7,79 @@ import com.backend.iniato.entity.PassengerProfile;
 import com.backend.iniato.entity.User;
 import com.backend.iniato.repo.PassengerProfileRepository;
 import com.backend.iniato.repo.UserRepository;
-import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
-
 public class PassengerProfileService {
 
     private final PassengerProfileRepository passengerProfileRepository;
     private final UserRepository userRepository;
+    private final UserLookupService userLookupService;
 
-    @Autowired
-    public PassengerProfileService(PassengerProfileRepository passengerProfileRepository, UserRepository userRepository) {
+    public PassengerProfileService(PassengerProfileRepository passengerProfileRepository,
+                                   UserRepository userRepository,
+                                   UserLookupService userLookupService) {
         this.passengerProfileRepository = passengerProfileRepository;
         this.userRepository = userRepository;
+        this.userLookupService = userLookupService;
     }
 
-    private User getCurrentUser() {
-        String identifier = SecurityContextHolder.getContext().getAuthentication().getName();
-        return userRepository.findByEmail(identifier)
-                .or(() -> userRepository.findByPhoneNumber(identifier))
-                .orElseThrow(() -> new RuntimeException("User not found"));
-    }
-
+    @Transactional(readOnly = true)
     public PassengerProfileResponse getProfile() {
-        User user = getCurrentUser();
+        User user = userLookupService.currentUser();
         PassengerProfile profile = passengerProfileRepository.findByUser(user)
                 .orElseThrow(() -> new RuntimeException("Profile not found"));
 
-        User user1 = profile.getUser();
-
-
-        return PassengerProfileResponse.builder()
-                .email(user.getEmail())
-                .fullName(profile.getFullName())
-                .phoneNumber(user1.getPhoneNumber())
-                .build();
+        return toResponse(user, profile);
     }
 
+    @Transactional
     public PassengerProfileResponse updateProfile(PassengerProfileRequest request) {
-        User user = getCurrentUser();
-        PassengerProfile profile = passengerProfileRepository.findByUser(user)
-                .orElse(PassengerProfile.builder().user(user).build());
+        User current = userLookupService.currentUser();
 
+        // The phone number is cached as a lookup key, so the OLD value has to be
+        // evicted — capture it before anything changes it.
+        final String previousEmail = current.getEmail();
+        final String previousPhone = current.getPhoneNumber();
+
+        PassengerProfile profile = passengerProfileRepository.findByUser(current)
+                .orElse(PassengerProfile.builder().user(current).build());
         profile.setFullName(request.getFullName());
-        profile.getUser().setPhoneNumber(request.getPhoneNumber());
+
+        User user = current;
+        boolean phoneChanged = request.getPhoneNumber() != null
+                && !request.getPhoneNumber().isBlank()
+                && !request.getPhoneNumber().equals(previousPhone);
+
+        if (phoneChanged) {
+            // currentUser() may be a detached snapshot rebuilt from cache, and
+            // saving that would merge its detached Roles too. Load the managed
+            // entity before mutating.
+            user = userLookupService.loadManaged(current.getId());
+            user.setPhoneNumber(request.getPhoneNumber());
+            userRepository.save(user);
+        }
 
         passengerProfileRepository.save(profile);
 
+        if (phoneChanged) {
+            // Evict both the old identifier (or the next login would resolve a
+            // stale user) and the new one (in case it was negatively resolved
+            // moments ago).
+            userLookupService.evict(previousEmail, previousPhone);
+            userLookupService.evict(user.getEmail(), user.getPhoneNumber());
+        }
+
+        return toResponse(user, profile);
+    }
+
+    private PassengerProfileResponse toResponse(User user, PassengerProfile profile) {
         return PassengerProfileResponse.builder()
                 .email(user.getEmail())
                 .fullName(profile.getFullName())
-                .phoneNumber(profile.getUser().getPhoneNumber())
+                .phoneNumber(user.getPhoneNumber())
+                .gender(profile.getGender() != null ? profile.getGender().name() : null)
                 .build();
     }
 }

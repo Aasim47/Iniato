@@ -26,6 +26,8 @@ public class RideSummaryDTO {
     private RideStatus status;
     private LocalDateTime requestedTime;
     private String driverName;
+    /** BIKE, AUTO or CAB — drives the rider-side fare band and badge. */
+    private String vehicleType;
     private Integer availableSeats;
 
     /** Route origin coordinates (driver's starting point). */

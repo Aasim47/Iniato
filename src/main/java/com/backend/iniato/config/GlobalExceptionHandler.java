@@ -34,6 +34,26 @@ public class GlobalExceptionHandler {
         return buildError(HttpStatus.CONFLICT, ex.getMessage(), null);
     }
 
+    /**
+     * A driver owes too much to keep driving.
+     * <p>
+     * Answered with 402 and a {@code code} the apps can branch on, so the
+     * driver app can send them to the payment screen rather than showing a
+     * generic failure.
+     */
+    @ExceptionHandler(DuesExceededException.class)
+    public ResponseEntity<Map<String, Object>> handleDuesExceeded(DuesExceededException ex) {
+        ResponseEntity<Map<String, Object>> response =
+                buildError(HttpStatus.PAYMENT_REQUIRED, ex.getMessage(), null);
+        Map<String, Object> body = response.getBody();
+        if (body != null) {
+            body.put("code", "DRIVER_DUES_EXCEEDED");
+            body.put("duesBalance", ex.getBalance());
+            body.put("duesThreshold", ex.getThreshold());
+        }
+        return response;
+    }
+
     @ExceptionHandler(SecurityException.class)
     public ResponseEntity<Map<String, Object>> handleSecurity(SecurityException ex) {
         return buildError(HttpStatus.FORBIDDEN, ex.getMessage(), null);

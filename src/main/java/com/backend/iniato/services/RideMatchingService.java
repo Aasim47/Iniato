@@ -58,7 +58,18 @@ public class RideMatchingService {
         this.rideRepository = rideRepository;
     }
 
-    public RideRequest saveRideRequest(RideRequestDTO requestDTO, User passenger) {
+    /**
+     * Persist a rider's request and return it as a DTO.
+     *
+     * <p>Mapped here, inside the transaction, rather than serializing the
+     * entity in the controller: that exposed the whole {@code passenger} User
+     * (password hash included) and touched the lazy {@code matchedRide}
+     * association during response writing.
+     */
+    @org.springframework.transaction.annotation.Transactional
+    public com.backend.iniato.dto.RideRequestResponseDTO saveRideRequest(
+            RideRequestDTO requestDTO, User passenger) {
+
         Point pickup = geometryFactory.createPoint(
                 new Coordinate(requestDTO.getPickupLng(), requestDTO.getPickupLat()));
         pickup.setSRID(SRID);
@@ -70,11 +81,28 @@ public class RideMatchingService {
                 .passenger(passenger)
                 .pickupLocation(pickup)
                 .destinationLocation(destination)
+                .pickupLocationName(requestDTO.getPickupLocation())
+                .destinationName(requestDTO.getDestination())
                 .pickupTime(java.time.LocalDateTime.parse(requestDTO.getPickupTime()))
                 .status("REQUESTED")
                 .build();
 
-        return rideRequestRepository.save(rideRequest);
+        RideRequest saved = rideRequestRepository.save(rideRequest);
+
+        return com.backend.iniato.dto.RideRequestResponseDTO.builder()
+                .requestId(saved.getId())
+                .passengerId(passenger != null ? passenger.getId() : null)
+                .passengerPhone(passenger != null ? passenger.getPhoneNumber() : null)
+                .pickupLat(pickup.getY())
+                .pickupLng(pickup.getX())
+                .destLat(destination.getY())
+                .destLng(destination.getX())
+                .pickupLocationName(saved.getPickupLocationName())
+                .destinationName(saved.getDestinationName())
+                .pickupTime(saved.getPickupTime())
+                .status(saved.getStatus())
+                .matchedRideId(saved.getMatchedRide() != null ? saved.getMatchedRide().getId() : null)
+                .build();
     }
 
     /**
@@ -93,6 +121,11 @@ public class RideMatchingService {
      *       has already passed or is not heading toward the pickup).</li>
      * </ol>
      */
+    // Transactional because the mapping below walks several lazy associations
+    // (ride.route, ride.driver, ride.passengers and each passenger's user).
+    // These resolved through the open-in-view session before; that is now off,
+    // since it hides exactly this kind of per-row query behind the response.
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
     public RideMatchResponseDTO findSharedRideMatches(RideRequestDTO requestDTO) {
         Point pickup = geometryFactory.createPoint(
                 new Coordinate(requestDTO.getPickupLng(), requestDTO.getPickupLat()));
@@ -100,11 +133,14 @@ public class RideMatchingService {
 
         double radiusMeters = 2000; // 2 km radius for nearby drivers
 
-        List<Ride> allPoolFormingRides = rideRepository.findByStatus(RideStatus.POOL_FORMING);
+        // Include both forming pools AND in-progress rides so riders ahead on the
+        // corridor can still discover and hop into a moving pooled auto with seats.
+        List<Ride> joinableRides = rideRepository.findByStatusIn(
+                java.util.List.of(RideStatus.POOL_FORMING, RideStatus.STARTED));
         List<DriverLocation> drivers = driverLocationRepository.findNearbyDrivers(
                 requestDTO.getPickupLng(), requestDTO.getPickupLat(), radiusMeters);
 
-        List<RideSummaryDTO> rideSummaries = allPoolFormingRides.stream()
+        List<RideSummaryDTO> rideSummaries = joinableRides.stream()
                 .filter(ride -> isRideCompatibleWithPassenger(ride, requestDTO))
                 .map(r -> {
                     Route route = r.getRoute();
@@ -115,6 +151,8 @@ public class RideMatchingService {
                             .status(r.getStatus())
                             .requestedTime(r.getRequestedTime())
                             .driverName(r.getDriver() != null ? r.getDriver().getPhoneNumber() : "Unassigned")
+                            .vehicleType(route != null && route.getVehicleType() != null
+                                    ? route.getVehicleType().name() : null)
                             .availableSeats(route != null ? route.getAvailableSeats() : null)
                             .originLat(route != null ? route.getOriginLat() : null)
                             .originLng(route != null ? route.getOriginLng() : null)
@@ -230,6 +268,26 @@ public class RideMatchingService {
         // (e.g. at a stop just before departure) are still included.
         // t > 1.0 would mean the pickup is beyond the route destination — exclude.
         if (t < -0.1 || t > 1.0) {
+            return false;
+        }
+
+        // 4. Destination-within-route check — passenger's destination must NOT extend
+        //    beyond the driver's route endpoint. If a rider wants A→C but the driver
+        //    only goes A→B (where C is past B), the ride should NOT match.
+        double tDest = projectionParameter(
+                pDestLat, pDestLng,
+                rOriginLat, rOriginLng,
+                rDestLat, rDestLng);
+
+        // tDest > 1.1 means the passenger's destination is significantly beyond the
+        // driver's destination — the driver won't go that far. Exclude.
+        // We allow a small tolerance (1.1) for destinations very close to the endpoint.
+        if (tDest > 1.1) {
+            return false;
+        }
+
+        // Also ensure the destination is ahead of the pickup (tDest > t)
+        if (tDest < t) {
             return false;
         }
 

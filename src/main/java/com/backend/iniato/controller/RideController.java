@@ -1,7 +1,6 @@
 package com.backend.iniato.controller;
 
 import com.backend.iniato.dto.*;
-import com.backend.iniato.entity.RideRequest;
 import com.backend.iniato.services.RideService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -83,7 +82,7 @@ public class RideController {
      */
     @GetMapping("/{rideId}/requests")
     @PreAuthorize("hasAuthority('DRIVER')")
-    public ResponseEntity<List<RideRequest>> getPendingRequests(@PathVariable Long rideId) {
+    public ResponseEntity<List<PendingRequestDTO>> getPendingRequests(@PathVariable Long rideId) {
         return ResponseEntity.ok(rideService.getPendingRequests(rideId));
     }
 

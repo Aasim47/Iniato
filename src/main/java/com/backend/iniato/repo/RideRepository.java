@@ -17,7 +17,12 @@ public interface RideRepository extends JpaRepository<Ride, Long> {
 
     List<Ride> findByStatus(RideStatus status);
 
+    List<Ride> findByStatusIn(List<RideStatus> statuses);
+
     Optional<Ride> findByRoute(Route route);
+
+    /** Batch-fetch rides for a set of routes to avoid per-route N+1 lookups. */
+    List<Ride> findByRouteIn(List<Route> routes);
 
     @Query("SELECT r FROM Ride r WHERE r.status = 'POOL_FORMING' " +
            "AND r.pickupLocation = :pickup AND r.destination = :destination")

@@ -24,6 +24,11 @@ public class PaymentService {
     /**
      * Split fare equally among passengers for a completed shared ride
      */
+    // Transactional because ride.getPassengers() is a lazy @OneToMany. This
+    // used to work only by accident, via the open-in-view session; that is now
+    // off (it silently turns one query into several per response), so the
+    // boundary has to be declared.
+    @org.springframework.transaction.annotation.Transactional
     public PaymentResponseDTO splitSharedFare(PaymentRequestDTO request) {
         Ride ride = rideRepository.findById(request.getRideId())
                 .orElseThrow(() -> new RuntimeException("Ride not found"));
@@ -33,6 +38,10 @@ public class PaymentService {
                 .toList();
 
         int passengerCount = completed.size();
+        if (passengerCount == 0) {
+            throw new IllegalStateException(
+                    "Cannot split fare: no completed passengers on this ride");
+        }
         double splitAmount = request.getAmount() / passengerCount;
 
         for (RidePassenger rp : completed) {

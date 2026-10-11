@@ -13,7 +13,7 @@ public class CorsConfig {
         // Allow Flutter Web (Chrome) running on any localhost port
         config.setAllowedOriginPatterns(List.of(
                 "http://localhost:*",
-                "http://127.0.0.1:*"
+                "http*"
         ));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));

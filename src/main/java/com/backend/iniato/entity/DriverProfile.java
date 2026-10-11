@@ -1,6 +1,7 @@
 package com.backend.iniato.entity;
 
 import com.backend.iniato.enums.DriverStatus;
+import com.backend.iniato.enums.VehicleType;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -19,8 +20,13 @@ public class DriverProfile {
     private String phoneNumber;
     private String vehicleRegistration;
     private String licenseNumber;
-    /** e.g. AUTO_RICKSHAW, BIKE, CAR, MINI_TRUCK */
-    private String vehicleType;
+    /**
+     * Vehicle this driver operates. Determines the seat capacity of every
+     * route they create and the fare band applied to it.
+     */
+    @Enumerated(EnumType.STRING)
+    @Builder.Default
+    private VehicleType vehicleType = VehicleType.AUTO;
 
     @Enumerated(EnumType.STRING)
     private DriverStatus status;

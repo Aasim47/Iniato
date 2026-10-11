@@ -1,5 +1,6 @@
 package com.backend.iniato.services;
 import com.backend.iniato.dto.*;
+import com.backend.iniato.entity.DirectRide;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
@@ -33,8 +34,20 @@ public class NotificationService {
     public void notifyPassengerDropped(Long rideId, DropPassengerEvent event) {
         messagingTemplate.convertAndSend("/topic/ride/" + rideId, event);
     }
-    /** Broadcast driver location update to all passengers on the ride. */
-    public void broadcastLocationUpdate(Long rideId, DriverLocationUpdateEvent event) {
+    /** Notify the driver's ride view that a passenger left the pool (not a drop-off). */
+    public void notifyPassengerLeft(Long rideId, PassengerLeftEvent event) {
+        messagingTemplate.convertAndSend("/topic/ride/" + rideId, event);
+    }
+    /**
+     * Broadcast driver location update to all passengers on the ride.
+     *
+     * <p>Takes {@link DriverLocationBroadcastDTO} — {@code driverId} as a number
+     * plus {@code latitude}/{@code longitude} — because that is what the rider
+     * app parses. It previously took {@code DriverLocationUpdateEvent}, whose
+     * {@code lat}/{@code lng} (and String id) matched no client field, so every
+     * value arrived as 0.
+     */
+    public void broadcastLocationUpdate(Long rideId, DriverLocationBroadcastDTO event) {
         messagingTemplate.convertAndSend("/topic/ride/" + rideId + "/location", event);
     }
     /**
@@ -53,5 +66,35 @@ public class NotificationService {
     /** Broadcast updated route info (seat count, status) to all waiting riders. */
     public void broadcastRouteUpdated(RouteResponseDTO routeDTO) {
         messagingTemplate.convertAndSend("/topic/routes/updated", routeDTO);
+    }
+
+    /** Broadcast a new direct ride request to all available drivers. */
+    public void broadcastDirectRideRequest(DirectRideResponseDTO directRide) {
+        messagingTemplate.convertAndSend("/topic/direct-rides/new", directRide);
+    }
+
+    /** Notify driver that a direct ride was accepted. */
+    public void notifyDriverDirectRideAccepted(DirectRideResponseDTO directRide) {
+        messagingTemplate.convertAndSend("/topic/driver/" + directRide.getDriverId() + "/direct-ride-accepted", directRide);
+    }
+
+    /** Notify driver that a direct ride was declined. */
+    public void notifyDriverDirectRideDeclined(DirectRideResponseDTO directRide) {
+        messagingTemplate.convertAndSend("/topic/driver/" + directRide.getDriverId() + "/direct-ride-declined", directRide);
+    }
+
+    /** Broadcast that a direct ride has started. */
+    public void broadcastDirectRideStarted(DirectRideResponseDTO directRide) {
+        messagingTemplate.convertAndSend("/topic/direct-rides/" + directRide.getId() + "/started", directRide);
+    }
+
+    /** Broadcast that a direct ride has completed. */
+    public void broadcastDirectRideCompleted(DirectRideResponseDTO directRide) {
+        messagingTemplate.convertAndSend("/topic/direct-rides/" + directRide.getId() + "/completed", directRide);
+    }
+
+    /** Broadcast that a direct ride was cancelled. */
+    public void broadcastDirectRideCancelled(DirectRideResponseDTO directRide) {
+        messagingTemplate.convertAndSend("/topic/direct-rides/" + directRide.getId() + "/cancelled", directRide);
     }
 }

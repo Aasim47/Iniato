@@ -1,7 +1,7 @@
 package com.backend.iniato.controller;
 
 import com.backend.iniato.dto.RiderCreateRequest;
-import com.backend.iniato.entity.Route;
+import com.backend.iniato.dto.RouteResponseDTO;
 import com.backend.iniato.services.MatchingService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -26,12 +26,9 @@ public class RiderController {
      */
     @PostMapping("/create-request")
     public ResponseEntity<?> createRequest(@RequestBody RiderCreateRequest request) {
-        var match = matchingService.matchPassengerToRoute(request);
-        if (match.isPresent()) {
-            return ResponseEntity.ok(match.get());
-        } else {
-            return ResponseEntity.status(404).body("No compatible route found.");
-        }
+        return matchingService.matchPassengerToRouteDto(request)
+                .<ResponseEntity<?>>map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.status(404).body("No compatible route found."));
     }
 
     /**
@@ -39,10 +36,9 @@ public class RiderController {
      * GET /rider/nearby-routes?lat=&lng=
      */
     @GetMapping("/nearby-routes")
-    public ResponseEntity<List<Route>> getNearbyRoutes(
+    public ResponseEntity<List<RouteResponseDTO>> getNearbyRoutes(
             @RequestParam double lat,
             @RequestParam double lng) {
-        List<Route> routes = matchingService.fetchActiveRoutesNearby(lat, lng, 5.0);
-        return ResponseEntity.ok(routes);
+        return ResponseEntity.ok(matchingService.fetchActiveRouteDtosNearby(lat, lng, 5.0));
     }
 }

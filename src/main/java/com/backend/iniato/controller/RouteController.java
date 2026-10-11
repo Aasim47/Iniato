@@ -2,12 +2,11 @@ package com.backend.iniato.controller;
 
 import com.backend.iniato.dto.*;
 import com.backend.iniato.entity.User;
-import com.backend.iniato.repo.UserRepository;
 import com.backend.iniato.services.RouteService;
+import com.backend.iniato.services.UserLookupService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -18,19 +17,24 @@ public class RouteController {
 
 
     private final RouteService routeService;
-    private final UserRepository userRepository;
+    private final UserLookupService userLookupService;
 
     @Autowired
-    public RouteController(RouteService routeService, UserRepository userRepository) {
+    public RouteController(RouteService routeService, UserLookupService userLookupService) {
         this.routeService = routeService;
-        this.userRepository = userRepository;
+        this.userLookupService = userLookupService;
     }
 
+    /**
+     * The authenticated driver.
+     *
+     * <p>Was a local two-query lookup (email, then phone). It is now the shared,
+     * cached single-query lookup — and on most requests it costs nothing at all,
+     * because the JWT filter already resolved this user into the security
+     * context microseconds earlier.
+     */
     private User getCurrentUser() {
-        String username = SecurityContextHolder.getContext().getAuthentication().getName();
-        return userRepository.findByPhoneNumber(username)
-                .or(() -> userRepository.findByEmail(username))
-                .orElseThrow(() -> new RuntimeException("User not found"));
+        return userLookupService.currentUser();
     }
 
     /**

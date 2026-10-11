@@ -9,6 +9,11 @@ public class FareEstimateRequestDTO {
     private double destLat;
     private double destLng;
     private int passengers;
+    /**
+     * BIKE, AUTO or CAB. Optional — defaults to AUTO when absent so that app
+     * builds predating vehicle types keep receiving sane estimates.
+     */
+    private String vehicleType;
 
     public double getPickupLat() {
         return pickupLat;
@@ -48,5 +53,13 @@ public class FareEstimateRequestDTO {
 
     public void setPassengers(int passengers) {
         this.passengers = passengers;
+    }
+
+    public String getVehicleType() {
+        return vehicleType;
+    }
+
+    public void setVehicleType(String vehicleType) {
+        this.vehicleType = vehicleType;
     }
 }
